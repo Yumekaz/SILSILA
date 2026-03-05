@@ -1,0 +1,506 @@
+"""
+callbacks.py
+------------
+All Dash callback functions — the reactive layer between UI and engine.
+"""
+
+import json
+from datetime import datetime, timezone
+from dash import Input, Output, State, callback, html
+import plotly.graph_objects as go
+import pandas as pd
+import networkx as nx
+
+from engine.cascade import run_cascade, cascaded_schedule
+from engine.graph_builder import compute_node_positions
+
+# ── Color palette (matches CSS variables) ─────────────────────────────────────
+COLORS = {
+    "bg_0":    "#06090F",
+    "bg_1":    "#0C1220",
+    "bg_2":    "#111B30",
+    "bg_3":    "#172039",
+    "border":  "#1C2D48",
+    "gold":    "#E8A020",
+    "gold_dim":"#9B6B14",
+    "cyan":    "#00C8FF",
+    "cyan_dim":"#006A87",
+    "teal":    "#00D4A0",
+    "red":     "#FF3D5A",
+    "orange":  "#FF6B35",
+    "text_1":  "#E4EBF7",
+    "text_2":  "#8CA0C0",
+    "text_3":  "#4A6080",
+    # Flight status
+    "normal":   "#2A4A7A",
+    "trigger":  "#00C8FF",
+    "delayed":  "#E8A020",
+    "delayed_h":"#FF6B35",
+    "critical": "#FF3D5A",
+    "landed":   "#2A5A4A",
+}
+
+FONT = dict(family="JetBrains Mono, monospace")
+
+
+def register_callbacks(app, G, df):
+    """Register all callbacks. Called from app.py after Dash is initialised."""
+
+    # ── Live clock ─────────────────────────────────────────────────────────────
+    @app.callback(
+        Output("live-clock", "children"),
+        Input("clock-interval", "n_intervals")
+    )
+    def update_clock(_):
+        now = datetime.now(tz=timezone.utc)
+        # AST = UTC+3
+        ast_hour = (now.hour + 3) % 24
+        return f"{ast_hour:02d}:{now.minute:02d}:{now.second:02d}"
+
+    # ── Delay display ──────────────────────────────────────────────────────────
+    @app.callback(
+        Output("delay-display", "children"),
+        Input("delay-slider", "value")
+    )
+    def update_delay_display(val):
+        if val is None:
+            return "— min"
+        if val >= 60:
+            h, m = divmod(val, 60)
+            return [f"{h}h {m:02d}", html.Span(" min")]
+        return [str(val), html.Span(" min")]
+
+    # ── Selected flight info card ──────────────────────────────────────────────
+    @app.callback(
+        Output("selected-flight-card", "children"),
+        Input("flight-select", "value")
+    )
+    def update_flight_card(flight_id):
+        if not flight_id or flight_id not in G.nodes:
+            return html.Div()
+        d = G.nodes[flight_id]
+        direction = d.get("direction", "")
+        origin    = d.get("origin", "—")
+        dest      = d.get("destination", "—")
+        route     = f"{origin} → {dest}"
+
+        ref_time = d.get("arr_actual" if direction == "inbound" else "dep_scheduled")
+        time_str  = ref_time.strftime("%H:%M") if pd.notna(ref_time) else "—"
+
+        return html.Div(className="flight-card", children=[
+            html.Div([
+                html.Span(flight_id, className="flight-card-route"),
+                html.Span(" · ", style={"color": COLORS["text_3"]}),
+                html.Span(
+                    "INBOUND" if direction == "inbound" else "OUTBOUND",
+                    className="tag tag-inbound" if direction == "inbound" else "tag tag-outbound",
+                    style={"marginLeft": "4px", "verticalAlign": "middle"}
+                ),
+            ]),
+            html.Div(
+                f"{origin} → {dest}",
+                style={"fontFamily": "JetBrains Mono", "fontSize": "12px",
+                       "color": COLORS["text_2"], "marginTop": "4px"}
+            ),
+            html.Div(className="flight-card-meta", children=[
+                html.Div(className="meta-item", children=[
+                    html.Div("AIRCRAFT", className="meta-key"),
+                    html.Div(d.get("aircraft_reg", "—"), className="meta-val"),
+                ]),
+                html.Div(className="meta-item", children=[
+                    html.Div("TYPE", className="meta-key"),
+                    html.Div(d.get("aircraft_type", "—"), className="meta-val"),
+                ]),
+                html.Div(className="meta-item", children=[
+                    html.Div("PAX ONBOARD", className="meta-key"),
+                    html.Div(f"{d.get('pax', 0):,}", className="meta-val"),
+                ]),
+                html.Div(className="meta-item", children=[
+                    html.Div("SCHED TIME", className="meta-key"),
+                    html.Div(time_str, className="meta-val"),
+                ]),
+                html.Div(className="meta-item", children=[
+                    html.Div("SLACK", className="meta-key"),
+                    html.Div(
+                        f"{d.get('turnaround_slack_min', 0):.0f} min",
+                        className="meta-val",
+                        style={"color": COLORS["gold"] if d.get('turnaround_slack_min', 999) < 30 else COLORS["text_2"]}
+                    ),
+                ]),
+                html.Div(className="meta-item", children=[
+                    html.Div("CREW", className="meta-key"),
+                    html.Div(d.get("crew_id", "—"), className="meta-val"),
+                ]),
+            ]),
+        ])
+
+    # ── Main simulation callback ───────────────────────────────────────────────
+    @app.callback(
+        Output("cascade-result-store", "data"),
+        Output("network-graph",        "figure"),
+        Output("cascade-log",          "children"),
+        Output("affected-count",       "children"),
+        Output("gantt-chart",          "figure"),
+        Output("summary-metrics",      "children"),
+        Input("trigger-btn",  "n_clicks"),
+        Input("reset-btn",    "n_clicks"),
+        State("flight-select","value"),
+        State("delay-slider", "value"),
+        prevent_initial_call=True
+    )
+    def run_simulation(trigger_clicks, reset_clicks, flight_id, delay_min,):
+        from dash import ctx
+        triggered = ctx.triggered_id
+
+        if triggered == "reset-btn":
+            return (
+                None,
+                _build_network_fig(G, df, None, None),
+                _empty_log(),
+                "0 AFFECTED",
+                _build_gantt(df, None),
+                html.Div(),
+            )
+
+        if not flight_id or not delay_min:
+            return (None, _build_network_fig(G, df, None, None),
+                    _empty_log(), "0 AFFECTED", _build_gantt(df, None), html.Div())
+
+        # Run cascade engine
+        result = run_cascade(G, flight_id, float(delay_min))
+        summary = result.summary()
+
+        # Cascaded schedule for Gantt
+        df_cascaded = cascaded_schedule(df, G, result)
+
+        affected_ids = {e.flight_id for e in result.events}
+
+        return (
+            json.dumps(summary),
+            _build_network_fig(G, df_cascaded, flight_id, affected_ids),
+            _build_cascade_log(result),
+            f"{result.flights_affected} AFFECTED",
+            _build_gantt(df_cascaded, result),
+            _build_summary_metrics(result),
+        )
+
+    # ── Network graph on flight selection (no simulation) ──────────────────────
+    @app.callback(
+        Output("network-graph", "figure", allow_duplicate=True),
+        Input("flight-select", "value"),
+        prevent_initial_call=True
+    )
+    def highlight_selected(flight_id):
+        return _build_network_fig(G, df, flight_id, set())
+
+
+# ── Figure builders ────────────────────────────────────────────────────────────
+
+def _node_color(flight_id: str, df_current: pd.DataFrame,
+                trigger_id: str | None, affected_ids: set | None) -> str:
+    """Return fill color for a graph node based on current status."""
+    if affected_ids is None:
+        affected_ids = set()
+
+    status_row = df_current[df_current["flight_id"] == flight_id]
+    if status_row.empty:
+        return COLORS["normal"]
+
+    status = status_row.iloc[0].get("status", "scheduled")
+
+    if flight_id == trigger_id:      return COLORS["trigger"]
+    if status == "critical":         return COLORS["critical"]
+    if status == "delayed_high":     return COLORS["orange"]
+    if status == "delayed":          return COLORS["delayed"]
+    if status == "landed":           return COLORS["landed"]
+    return COLORS["normal"]
+
+
+def _build_network_fig(
+    G: nx.DiGraph,
+    df: pd.DataFrame,
+    trigger_id: str | None,
+    affected_ids: set | None,
+) -> go.Figure:
+    """Render the flight dependency network as a Plotly figure."""
+    if affected_ids is None:
+        affected_ids = set()
+
+    positions = compute_node_positions(G)
+
+    # ── Edges ──────────────────────────────────────────────────────────────────
+    edge_traces = []
+    for edge_type, color, dash in [
+        ("ROTATION", COLORS["cyan"],  "solid"),
+        ("CREW",     COLORS["teal"],  "dot"),
+        ("PAX_CNXN", COLORS["gold"],  "dash"),
+    ]:
+        ex, ey = [], []
+        for u, v, d in G.edges(data=True):
+            if d.get("edge_type") != edge_type:
+                continue
+            x0, y0 = positions.get(u, (0, 0))
+            x1, y1 = positions.get(v, (0, 0))
+            ex += [x0, x1, None]
+            ey += [y0, y1, None]
+
+        if ex:
+            opacity = 0.9 if (trigger_id and any(
+                G.has_edge(u, v) and (u == trigger_id or v == trigger_id or
+                           u in affected_ids or v in affected_ids)
+                for u, v, d in G.edges(data=True) if d.get("edge_type") == edge_type
+            )) else 0.25
+
+            edge_traces.append(go.Scatter(
+                x=ex, y=ey, mode="lines",
+                line=dict(color=color, width=1.5, dash=dash),
+                opacity=opacity,
+                hoverinfo="none",
+                showlegend=False,
+            ))
+
+    # ── Nodes ──────────────────────────────────────────────────────────────────
+    node_x, node_y, node_color, node_size = [], [], [], []
+    node_text, node_hover = [], []
+
+    for flight_id, data in G.nodes(data=True):
+        x, y = positions.get(flight_id, (12, 0))
+        node_x.append(x)
+        node_y.append(y)
+
+        color = _node_color(flight_id, df, trigger_id, affected_ids)
+        node_color.append(color)
+
+        # Size = proportional to pax count
+        pax = data.get("pax", 100)
+        size = 10 + (pax / 517) * 18  # 10–28 range
+        if flight_id == trigger_id:
+            size += 8
+        node_size.append(size)
+
+        node_text.append(flight_id)
+
+        direction = data.get("direction", "")
+        origin    = data.get("origin", "—")
+        dest      = data.get("destination", "—")
+        aircraft  = data.get("aircraft_reg", "—")
+        a_type    = data.get("aircraft_type", "—")
+        pax_n     = data.get("pax", 0)
+        slack     = data.get("turnaround_slack_min", 0)
+
+        node_hover.append(
+            f"<b style='font-family:JetBrains Mono'>{flight_id}</b><br>"
+            f"{origin} → {dest} · {direction.upper()}<br>"
+            f"{aircraft} ({a_type})<br>"
+            f"PAX: {pax_n:,}  |  Slack: {slack:.0f} min"
+        )
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y, mode="markers+text",
+        marker=dict(
+            color=node_color, size=node_size,
+            line=dict(color=COLORS["bg_1"], width=2),
+            symbol="circle",
+        ),
+        text=node_text,
+        textposition="top center",
+        textfont=dict(family="Barlow Condensed", size=11, color=COLORS["text_2"]),
+        hovertext=node_hover,
+        hovertemplate="%{hovertext}<extra></extra>",
+        hoverlabel=dict(
+            bgcolor=COLORS["bg_2"],
+            bordercolor=COLORS["border"],
+            font=dict(family="JetBrains Mono", size=12, color=COLORS["text_1"]),
+        ),
+        showlegend=False,
+    )
+
+    fig = go.Figure(data=edge_traces + [node_trace])
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor ="rgba(0,0,0,0)",
+        margin=dict(l=20, r=20, t=20, b=20),
+        showlegend=False,
+        hovermode="closest",
+        xaxis=dict(
+            visible=True, showgrid=True,
+            gridcolor="rgba(28,45,72,0.5)",
+            zeroline=False, showticklabels=True,
+            tickfont=dict(family="JetBrains Mono", size=9, color=COLORS["text_3"]),
+            tickformat="%H:%M",
+            title=dict(text="TIME (UTC)", font=dict(size=9, color=COLORS["text_3"])),
+        ),
+        yaxis=dict(visible=False, showgrid=False, zeroline=False),
+        dragmode="pan",
+    )
+    return fig
+
+
+def _build_gantt(df: pd.DataFrame, result) -> go.Figure:
+    """Horizontal Gantt — one bar per flight, colored by status."""
+    rows = []
+    for _, r in df.iterrows():
+        if r["direction"] == "inbound":
+            if pd.isna(r.get("arr_scheduled")) or pd.isna(r.get("arr_actual")):
+                continue
+            start = r["arr_scheduled"]
+            end   = r["arr_actual"]
+        else:
+            if pd.isna(r.get("dep_scheduled")) or pd.isna(r.get("dep_actual")):
+                continue
+            start = r["dep_scheduled"]
+            end   = r["dep_actual"]
+
+        # Make sure we have at least 5 min bar width for visibility
+        if (end - start).total_seconds() < 300:
+            end = start + pd.Timedelta(minutes=5)
+
+        rows.append({
+            "flight":    r["flight_id"],
+            "start":     start,
+            "end":       end,
+            "status":    r.get("status", "scheduled"),
+            "aircraft":  r.get("aircraft_reg", ""),
+            "direction": r["direction"],
+        })
+
+    if not rows:
+        return go.Figure()
+
+    status_colors = {
+        "scheduled":    COLORS["normal"],
+        "landed":       COLORS["landed"],
+        "trigger":      COLORS["trigger"],
+        "delayed":      COLORS["delayed"],
+        "delayed_high": COLORS["orange"],
+        "critical":     COLORS["critical"],
+    }
+
+    fig = go.Figure()
+    for row in sorted(rows, key=lambda x: x["start"]):
+        color = status_colors.get(row["status"], COLORS["normal"])
+        fig.add_trace(go.Bar(
+            x=[(row["end"] - row["start"]).total_seconds() / 60],
+            y=[row["flight"]],
+            base=[row["start"]],
+            orientation="h",
+            marker=dict(color=color, opacity=0.85, line=dict(width=0)),
+            hovertemplate=(
+                f"<b>{row['flight']}</b><br>"
+                f"{row['direction'].upper()} · {row['aircraft']}<br>"
+                f"Start: {row['start'].strftime('%H:%M')}<br>"
+                f"End:   {row['end'].strftime('%H:%M')}<br>"
+                f"Status: {row['status'].upper()}"
+                "<extra></extra>"
+            ),
+            showlegend=False,
+            name=row["flight"],
+        ))
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor ="rgba(0,0,0,0)",
+        margin=dict(l=90, r=10, t=4, b=30),
+        barmode="overlay",
+        font=dict(family="JetBrains Mono", color=COLORS["text_2"], size=10),
+        xaxis=dict(
+            type="date",
+            showgrid=True, gridcolor="rgba(28,45,72,0.6)",
+            zeroline=False,
+            tickfont=dict(size=9, color=COLORS["text_3"]),
+            tickformat="%H:%M",
+        ),
+        yaxis=dict(
+            showgrid=False, zeroline=False,
+            tickfont=dict(size=9, color=COLORS["text_3"]),
+            autorange="reversed",
+        ),
+        hoverlabel=dict(
+            bgcolor=COLORS["bg_2"],
+            bordercolor=COLORS["border"],
+            font=dict(family="JetBrains Mono", size=11, color=COLORS["text_1"]),
+        ),
+    )
+    return fig
+
+
+def _build_cascade_log(result) -> list:
+    """Build the right-panel cascade event list."""
+    if not result.events:
+        return [html.Div(className="log-empty", children=[
+            html.Div("◎", className="icon"),
+            html.Div("NO CASCADE"),
+            html.Div("Delay absorbed within existing slack",
+                     style={"opacity": "0.5", "textTransform": "none"}),
+        ])]
+
+    items = []
+    for event in result.events:
+        delay_str = f"+{event.delay_min:.0f} min"
+        path_str  = " → ".join(event.propagation_path)
+
+        items.append(html.Div(
+            className=f"cascade-item severity-{event.severity}",
+            children=[
+                html.Div(className="cascade-item-top", children=[
+                    html.Span([
+                        event.flight_id,
+                        html.Span(event.edge_type,
+                                  className=f"ci-type-tag {event.edge_type}"),
+                    ], className="ci-flight"),
+                    html.Span(delay_str,
+                              className=f"ci-delay {event.severity}"),
+                ]),
+                html.Div([
+                    html.Span(f"via {event.caused_by}", style={"marginRight": "8px"}),
+                    html.Span(f"PAX: {event.pax_affected:,}"),
+                    html.Span(f"  ${event.cost_usd:,.0f}",
+                              style={"color": COLORS["text_3"]}),
+                ], className="ci-meta"),
+                html.Div(
+                    path_str,
+                    style={"fontFamily": "JetBrains Mono", "fontSize": "9px",
+                           "color": COLORS["text_3"], "marginTop": "3px",
+                           "whiteSpace": "nowrap", "overflow": "hidden",
+                           "textOverflow": "ellipsis"}
+                ),
+            ]
+        ))
+    return items
+
+
+def _build_summary_metrics(result) -> html.Div:
+    s = result.summary()
+    return html.Div([
+        html.Div(className="metrics-row", children=[
+            html.Div(className="metric-box gold", children=[
+                html.Div("FLIGHTS HIT",  className="metric-key"),
+                html.Div(s["flights_affected"], className="metric-val"),
+            ]),
+            html.Div(className="metric-box red", children=[
+                html.Div("TOTAL DELAY",  className="metric-key"),
+                html.Div(f"{s['total_delay_min']:.0f}m", className="metric-val"),
+            ]),
+        ]),
+        html.Div(className="metrics-row", children=[
+            html.Div(className="metric-box cyan", children=[
+                html.Div("PAX AFFECTED", className="metric-key"),
+                html.Div(f"{s['total_pax_affected']:,}", className="metric-val"),
+            ]),
+            html.Div(className="metric-box teal", children=[
+                html.Div("EST. COST",    className="metric-key"),
+                html.Div(f"${s['estimated_cost_usd']:,.0f}", className="metric-val",
+                         style={"fontSize": "16px"}),
+            ]),
+        ]),
+    ])
+
+
+def _empty_log() -> list:
+    return [html.Div(className="log-empty", children=[
+        html.Div("◌", className="icon"),
+        html.Div("AWAITING INPUT"),
+        html.Div("Select a flight and set delay",
+                 style={"opacity": "0.5", "textTransform": "none",
+                        "letterSpacing": "0"}),
+    ])]

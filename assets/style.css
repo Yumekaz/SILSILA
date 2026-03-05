@@ -1,0 +1,500 @@
+/* ═══════════════════════════════════════════════════════════════
+   DOHA CASCADE SIMULATOR — CUSTOM STYLESHEET
+   Aesthetic: precision-industrial ops center. Not a template.
+   Fonts: Barlow Condensed (headers) + JetBrains Mono (data)
+═══════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;600;700;800&family=JetBrains+Mono:wght@300;400;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
+
+/* ── Root Variables ─────────────────────────────────────────── */
+:root {
+  --bg-0:        #06090F;   /* deepest background          */
+  --bg-1:        #0C1220;   /* card surface                */
+  --bg-2:        #111B30;   /* elevated surface            */
+  --bg-3:        #172039;   /* highlight surface           */
+
+  --border:      #1C2D48;
+  --border-soft: #142038;
+
+  --gold:        #E8A020;   /* Qatar Airways amber         */
+  --gold-dim:    #9B6B14;
+  --cyan:        #00C8FF;
+  --cyan-dim:    #006A87;
+  --teal:        #00D4A0;
+  --red:         #FF3D5A;
+  --red-dim:     #7A1A2A;
+  --orange:      #FF6B35;
+
+  --text-1:      #E4EBF7;   /* primary text                */
+  --text-2:      #8CA0C0;   /* secondary text              */
+  --text-3:      #4A6080;   /* muted text                  */
+
+  --font-head:   'Barlow Condensed', sans-serif;
+  --font-data:   'JetBrains Mono', monospace;
+  --font-body:   'IBM Plex Sans', sans-serif;
+
+  --radius:      4px;
+  --radius-lg:   8px;
+}
+
+/* ── Reset & Base ───────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background-color: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 56px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.brand-title {
+  font-family: var(--font-head);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-1);
+  text-transform: uppercase;
+}
+
+.brand-title span {
+  color: var(--gold);
+}
+
+.brand-sub {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0.12em;
+}
+
+.header-indicators {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.ind-label {
+  font-family: var(--font-data);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+.ind-value {
+  font-family: var(--font-data);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cyan);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 8px var(--teal);
+  animation: pulse-dot 2s infinite;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--teal); }
+  50%       { opacity: 0.6; box-shadow: 0 0 14px var(--teal); }
+}
+
+/* ── Main Layout ─────────────────────────────────────────────── */
+.main-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  grid-template-rows: 1fr;
+  height: calc(100vh - 56px - 260px);
+  min-height: 420px;
+  gap: 1px;
+  background: var(--border);
+}
+
+.bottom-panel {
+  height: 260px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+}
+
+/* ── Panel Base ──────────────────────────────────────────────── */
+.panel {
+  background: var(--bg-1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-family: var(--font-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.panel-badge {
+  font-family: var(--font-data);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* ── Control Panel ───────────────────────────────────────────── */
+.control-section {
+  margin-bottom: 20px;
+}
+
+.control-label {
+  font-family: var(--font-data);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+  display: block;
+}
+
+/* Flight Selector */
+.Select-control, .Select-menu-outer {
+  background: var(--bg-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  color: var(--text-1) !important;
+}
+
+.Select-value-label, .Select-placeholder {
+  color: var(--text-1) !important;
+  font-family: var(--font-data) !important;
+  font-size: 13px !important;
+}
+
+.Select-option {
+  background: var(--bg-2) !important;
+  color: var(--text-2) !important;
+  font-family: var(--font-data) !important;
+  font-size: 12px !important;
+}
+
+.Select-option:hover, .Select-option.is-focused {
+  background: var(--bg-3) !important;
+  color: var(--cyan) !important;
+}
+
+.Select-arrow { border-color: var(--text-3) transparent transparent !important; }
+
+/* Delay Slider */
+.rc-slider-track  { background: var(--gold) !important; }
+.rc-slider-handle { border-color: var(--gold) !important; background: var(--gold) !important; }
+.rc-slider-rail   { background: var(--bg-3) !important; }
+
+.delay-display {
+  font-family: var(--font-data);
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--gold);
+  text-align: center;
+  margin: 8px 0;
+  letter-spacing: -0.02em;
+}
+
+.delay-display span {
+  font-size: 14px;
+  color: var(--text-3);
+  font-weight: 300;
+  margin-left: 4px;
+}
+
+/* Trigger Button */
+.trigger-btn {
+  width: 100%;
+  padding: 12px;
+  background: transparent;
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  color: var(--gold);
+  font-family: var(--font-head);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+
+.trigger-btn:hover {
+  background: var(--gold);
+  color: var(--bg-0);
+  box-shadow: 0 0 20px rgba(232, 160, 32, 0.35);
+}
+
+.trigger-btn:active { transform: scale(0.98); }
+
+.reset-btn {
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-3);
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-top: 6px;
+}
+
+.reset-btn:hover { border-color: var(--text-2); color: var(--text-2); }
+
+/* Flight Info Card */
+.flight-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.flight-card-route {
+  font-family: var(--font-head);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: 0.05em;
+}
+
+.flight-card-route .iata {
+  color: var(--cyan);
+}
+
+.flight-card-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.meta-item { display: flex; flex-direction: column; gap: 2px; }
+.meta-key  { font-family: var(--font-data); font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em; }
+.meta-val  { font-family: var(--font-data); font-size: 12px; color: var(--text-2); }
+
+/* Metrics Row */
+.metrics-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.metric-box {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.metric-box.gold  { border-color: var(--gold-dim);  }
+.metric-box.red   { border-color: var(--red-dim);   }
+.metric-box.cyan  { border-color: var(--cyan-dim);  }
+.metric-box.teal  { border-color: var(--teal);      }
+
+.metric-key {
+  font-family: var(--font-data);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.metric-val {
+  font-family: var(--font-data);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+.metric-box.gold .metric-val  { color: var(--gold);  }
+.metric-box.red  .metric-val  { color: var(--red);   }
+.metric-box.cyan .metric-val  { color: var(--cyan);  }
+.metric-box.teal .metric-val  { color: var(--teal);  }
+
+/* ── Cascade Log ─────────────────────────────────────────────── */
+.cascade-log { display: flex; flex-direction: column; gap: 6px; }
+
+.log-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  gap: 8px;
+  color: var(--text-3);
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.log-empty .icon {
+  font-size: 28px;
+  opacity: 0.3;
+}
+
+.cascade-item {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  transition: border-color 0.15s;
+}
+
+.cascade-item.severity-CRITICAL { border-left-color: var(--red);    }
+.cascade-item.severity-HIGH     { border-left-color: var(--orange); }
+.cascade-item.severity-MEDIUM   { border-left-color: var(--gold);   }
+.cascade-item.severity-LOW      { border-left-color: var(--cyan-dim); }
+
+.cascade-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.ci-flight {
+  font-family: var(--font-head);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: 0.05em;
+}
+
+.ci-delay {
+  font-family: var(--font-data);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ci-delay.CRITICAL { color: var(--red);    }
+.ci-delay.HIGH     { color: var(--orange); }
+.ci-delay.MEDIUM   { color: var(--gold);   }
+.ci-delay.LOW      { color: var(--cyan);   }
+
+.ci-meta {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.ci-type-tag {
+  display: inline-block;
+  font-family: var(--font-data);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 0.06em;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.ci-type-tag.ROTATION { background: rgba(0,200,255,0.1);  color: var(--cyan);  border: 1px solid var(--cyan-dim); }
+.ci-type-tag.CREW     { background: rgba(0,212,160,0.1);  color: var(--teal);  border: 1px solid var(--teal); }
+.ci-type-tag.PAX_CNXN { background: rgba(232,160,32,0.1); color: var(--gold);  border: 1px solid var(--gold-dim); }
+
+/* ── Network Graph ───────────────────────────────────────────── */
+.graph-container {
+  flex: 1;
+  position: relative;
+}
+
+/* ── Gantt ───────────────────────────────────────────────────── */
+.gantt-container {
+  height: 100%;
+  padding: 0 12px 8px;
+}
+
+/* ── Misc Utilities ──────────────────────────────────────────── */
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 12px 0;
+}
+
+.tag {
+  display: inline-block;
+  font-family: var(--font-data);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  letter-spacing: 0.06em;
+  border: 1px solid;
+}
+
+.tag-inbound  { color: var(--cyan);  border-color: var(--cyan-dim);  background: rgba(0,200,255,0.07); }
+.tag-outbound { color: var(--gold);  border-color: var(--gold-dim);  background: rgba(232,160,32,0.07); }
+.tag-critical { color: var(--red);   border-color: var(--red-dim);   background: rgba(255,61,90,0.07); }
+
+/* Scrollbar */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
