@@ -20,8 +20,6 @@ from datetime import datetime, timedelta, timezone
 from engine.config import (
     MIN_TURNAROUND_MINUTES,
     MIN_PAX_CONNECT_MIN,
-    COST_PAX_PER_MIN,
-    COST_AIRCRAFT_PER_MIN
 )
 
 
@@ -39,18 +37,22 @@ def build_graph(df: pd.DataFrame) -> nx.DiGraph:
     for _, row in df.iterrows():
         # Compute a reference time (arr for inbound, dep for outbound)
         ref_time = row["arr_actual"] if row["direction"] == "inbound" else row["dep_scheduled"]
+        aircraft_reg = str(row.get("aircraft_reg", "A7-UNK")).upper()
+        seats = int(row.get("seats", 0) or 0)
+        load_factor = float(row.get("load_factor", 0.0) or 0.0)
+        pax = int(row.get("pax", 0) or 0)
 
         G.add_node(
             row["flight_id"],
             direction=row["direction"],
             origin=row["origin"],
             destination=row["destination"],
-            aircraft_reg=row["aircraft_reg"],
-            aircraft_type=row["aircraft_type"],
-            crew_id=row["crew_id"],
-            seats=int(row["seats"]),
-            pax=int(row["pax"]),
-            load_factor=float(row["load_factor"]),
+            aircraft_reg=aircraft_reg,
+            aircraft_type=row.get("aircraft_type", "UNKNOWN"),
+            crew_id=row.get("crew_id", "CREW-UNK"),
+            seats=seats,
+            pax=pax,
+            load_factor=load_factor,
             arr_scheduled=row.get("arr_scheduled", pd.NaT),
             arr_actual=row.get("arr_actual", pd.NaT),
             dep_scheduled=row.get("dep_scheduled", pd.NaT),

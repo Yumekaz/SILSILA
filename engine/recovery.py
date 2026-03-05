@@ -169,7 +169,9 @@ def heuristic_swap(
     ]
 
     residual_delay_min = 0.0
-    residual_pax       = 0
+    residual_cost = 0.0
+    residual_flights = set()
+    residual_pax_affected = 0
 
     for out_id in rotation_successors:
         out_mask = df_rec["flight_id"] == out_id
@@ -198,7 +200,13 @@ def heuristic_swap(
         if residual_min > 0:
             df_rec.loc[out_mask, "status"] = "delayed"
             residual_delay_min += residual_min
-            residual_pax        = max(residual_pax, int(out_row["pax"]))
+            residual_cost += (
+                residual_min * COST_AIRCRAFT_PER_MIN +
+                residual_min * int(out_row["pax"]) * COST_PAX_PER_MIN
+            )
+            if out_id not in residual_flights:
+                residual_flights.add(out_id)
+                residual_pax_affected += int(out_row["pax"])
             action_log.append(
                 f"  {out_id}: departs {new_dep.strftime('%H:%M')} "
                 f"(+{residual_min:.0f} min residual via spare)"
@@ -220,14 +228,20 @@ def heuristic_swap(
         df_rec.loc[mask, "dep_delay_min"] += event.delay_min
         df_rec.loc[mask, "status"] = "delayed"
         residual_delay_min += event.delay_min
+        row = df_rec[mask].iloc[0]
+        pax = int(row.get("pax", 0))
+        residual_cost += (
+            event.delay_min * COST_AIRCRAFT_PER_MIN +
+            event.delay_min * pax * COST_PAX_PER_MIN
+        )
+        if event.flight_id not in residual_flights:
+            residual_flights.add(event.flight_id)
+            residual_pax_affected += pax
         action_log.append(f"  {event.flight_id}: {event.pax_stranded} pax stranded (connection missed — swap cannot fix)")
 
     # ── Cost calculation ─────────────────────────────────────────────────────
     direct_cost      = SWAP_POSITIONING_COST
-    residual_cascade_cost = (
-        residual_delay_min * COST_AIRCRAFT_PER_MIN +
-        residual_delay_min * residual_pax * COST_PAX_PER_MIN
-    )
+    residual_cascade_cost = residual_cost
     total_cost       = direct_cost + residual_cascade_cost
     baseline_cost    = result.total_cost_usd
     cost_saved       = baseline_cost - total_cost
@@ -235,7 +249,7 @@ def heuristic_swap(
     delay_reduction  = result.total_delay_min - residual_delay_min
     delay_pct        = (delay_reduction / result.total_delay_min * 100) if result.total_delay_min > 0 else 0
 
-    pax_saved        = max(0, result.total_pax_affected - residual_pax)
+    pax_saved        = max(0, result.total_pax_affected - residual_pax_affected)
 
     # Score: weighted combo of delay reduction % and cost efficiency
     # Score: 60% weight on delay reduction, 40% weight on cost efficiency (clamped 0-100)
@@ -257,7 +271,7 @@ def heuristic_swap(
         delay_reduction_min=delay_reduction,
         delay_reduction_pct=round(delay_pct, 1),
         baseline_pax_affected=result.total_pax_affected,
-        recovered_pax_affected=residual_pax,
+        recovered_pax_affected=residual_pax_affected,
         pax_saved=pax_saved,
         pax_stranded=sum(e.pax_stranded for e in pax_cnxn_events),
         direct_cost_usd=round(direct_cost, 0),
@@ -315,7 +329,9 @@ def heuristic_delay(
     turnaround_saving = MIN_TURNAROUND_MINUTES - COMPRESS_TURNAROUND_MINUTES  # 7 min
 
     total_residual_delay = 0.0
-    total_residual_pax   = 0
+    total_residual_cost = 0.0
+    residual_flights = set()
+    total_residual_pax = 0
 
     for event in result.events:
         mask = df_rec["flight_id"] == event.flight_id
@@ -336,7 +352,13 @@ def heuristic_delay(
 
             total_residual_delay += compressed_delay
             pax = df_rec.loc[mask, "pax"].values[0]
-            total_residual_pax = max(total_residual_pax, int(pax))
+            total_residual_cost += (
+                compressed_delay * COST_AIRCRAFT_PER_MIN +
+                compressed_delay * int(pax) * COST_PAX_PER_MIN
+            )
+            if event.flight_id not in residual_flights:
+                residual_flights.add(event.flight_id)
+                total_residual_pax += int(pax)
 
             action_log.append(
                 f"  {event.flight_id}: {event.delay_min:.0f}m → {compressed_delay:.0f}m "
@@ -351,16 +373,21 @@ def heuristic_delay(
             df_rec.loc[mask, "dep_delay_min"] += event.delay_min
             df_rec.loc[mask, "status"] = "delayed"
             total_residual_delay += event.delay_min
+            pax = int(df_rec.loc[mask, "pax"].values[0])
+            total_residual_cost += (
+                event.delay_min * COST_AIRCRAFT_PER_MIN +
+                event.delay_min * pax * COST_PAX_PER_MIN
+            )
+            if event.flight_id not in residual_flights:
+                residual_flights.add(event.flight_id)
+                total_residual_pax += pax
             action_log.append(
                 f"  {event.flight_id}: pax connection delay unchanged (+{event.delay_min:.0f}m)"
             )
 
     # ── Cost ──────────────────────────────────────────────────────────────────
     direct_cost   = 0.0   # No asset cost — purely operational pressure
-    residual_cost = (
-        total_residual_delay * COST_AIRCRAFT_PER_MIN +
-        total_residual_delay * total_residual_pax * COST_PAX_PER_MIN
-    )
+    residual_cost = total_residual_cost
     total_cost    = direct_cost + residual_cost
     baseline_cost = result.total_cost_usd
     cost_saved    = baseline_cost - total_cost
@@ -478,7 +505,9 @@ def heuristic_cancel(
 
     # Other cascade events still propagate (non-cancelled chain)
     residual_delay_min = 0.0
-    residual_pax       = 0
+    residual_cost = 0.0
+    residual_flights = set()
+    residual_pax_affected = 0
 
     for event in result.events:
         if event.flight_id == target_id:
@@ -499,7 +528,13 @@ def heuristic_cancel(
 
         residual_delay_min += event.delay_min
         pax = df_rec.loc[mask, "pax"].values[0]
-        residual_pax = max(residual_pax, int(pax))
+        residual_cost += (
+            event.delay_min * COST_AIRCRAFT_PER_MIN +
+            event.delay_min * int(pax) * COST_PAX_PER_MIN
+        )
+        if event.flight_id not in residual_flights:
+            residual_flights.add(event.flight_id)
+            residual_pax_affected += int(pax)
         action_log.append(f"  {event.flight_id}: +{event.delay_min:.0f}m residual (not in cancelled chain)")
 
     # ── Cost ──────────────────────────────────────────────────────────────────
@@ -518,17 +553,13 @@ def heuristic_cancel(
         action_log.append(f"  EU261 NOT triggered ({target_event.delay_min:.0f}m < {CANCEL_EU261_THRESHOLD_MIN}m)")
 
     direct_cost   = rebooking_cost + eu261_cost
-    residual_cost = (
-        residual_delay_min * COST_AIRCRAFT_PER_MIN +
-        residual_delay_min * residual_pax * COST_PAX_PER_MIN
-    )
     total_cost    = direct_cost + residual_cost
     baseline_cost = result.total_cost_usd
     cost_saved    = baseline_cost - total_cost
 
     delay_reduction = result.total_delay_min - residual_delay_min
     delay_pct       = (delay_reduction / result.total_delay_min * 100) if result.total_delay_min > 0 else 0
-    pax_saved       = max(0, result.total_pax_affected - residual_pax)
+    pax_saved       = max(0, result.total_pax_affected - residual_pax_affected)
 
     # Score: 55% delay, 45% cost efficiency
     cost_ratio = min(1.0, max(0.0, 1.0 - (total_cost / max(baseline_cost, 1))))
@@ -551,7 +582,7 @@ def heuristic_cancel(
         delay_reduction_min=delay_reduction,
         delay_reduction_pct=round(delay_pct, 1),
         baseline_pax_affected=result.total_pax_affected,
-        recovered_pax_affected=residual_pax,
+        recovered_pax_affected=residual_pax_affected,
         pax_saved=pax_saved,
         pax_stranded=cancelled_pax,
         direct_cost_usd=round(direct_cost, 0),

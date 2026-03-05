@@ -46,6 +46,25 @@ FONT = dict(family="JetBrains Mono, monospace")
 
 def register_callbacks(app, G, df, positions):
     """Register all callbacks. Called from app.py after Dash is initialised."""
+    from dash.exceptions import PreventUpdate
+    sim_cache = {}
+
+    def _cached_simulation(flight_id: str, delay_min: float):
+        key = (flight_id, round(float(delay_min), 1))
+        if key in sim_cache:
+            return sim_cache[key]
+
+        result = run_cascade(G, flight_id, float(delay_min))
+        df_cascaded = cascaded_schedule(df, G, result)
+        recovery_options = evaluate_all_recovery_options(G, df, result)
+        payload = (result, df_cascaded, recovery_options)
+        sim_cache[key] = payload
+
+        # Keep small bounded cache to avoid unbounded memory growth.
+        if len(sim_cache) > 24:
+            oldest_key = next(iter(sim_cache))
+            sim_cache.pop(oldest_key, None)
+        return payload
 
     # ── Live clock ─────────────────────────────────────────────────────────────
     @app.callback(
@@ -153,7 +172,8 @@ def register_callbacks(app, G, df, positions):
         Input("reset-btn",    "n_clicks"),
         State("flight-select","value"),
         State("delay-slider", "value"),
-        prevent_initial_call=True
+        prevent_initial_call=True,
+        running=[(Output("trigger-btn", "disabled"), True, False)],
     )
     def run_simulation(trigger_clicks, reset_clicks, flight_id, delay_min):
         from dash import ctx
@@ -185,13 +205,9 @@ def register_callbacks(app, G, df, positions):
             )
 
         # ── Phase 1: Run cascade ───────────────────────────────────────────────
-        result      = run_cascade(G, flight_id, float(delay_min))
-        summary     = result.summary()
-        df_cascaded = cascaded_schedule(df, G, result)
+        result, df_cascaded, recovery_options = _cached_simulation(flight_id, float(delay_min))
+        summary = result.summary()
         affected_ids = {e.flight_id for e in result.events}
-
-        # ── Phase 2: Evaluate recovery options ─────────────────────────────────
-        recovery_options = evaluate_all_recovery_options(G, df, result)
 
         return (
             json.dumps(summary),
@@ -219,19 +235,18 @@ def register_callbacks(app, G, df, positions):
     def apply_recovery(c0, c1, c2, flight_id, delay_min):
         from dash import ctx
         if not ctx.triggered_id or not flight_id or not delay_min:
-            raise Exception("No trigger")
+            raise PreventUpdate
 
         triggered_idx = ctx.triggered_id.get("index", 0)
 
-        result   = run_cascade(G, flight_id, float(delay_min))
-        options  = evaluate_all_recovery_options(G, df, result)
+        result, _, options = _cached_simulation(flight_id, float(delay_min))
 
         if triggered_idx >= len(options):
-            raise Exception("Index out of range")
+            raise PreventUpdate
 
         selected = options[triggered_idx]
         if not selected.feasible or selected.df_recovered is None:
-            raise Exception("Not feasible")
+            raise PreventUpdate
 
         df_rec       = selected.df_recovered
         affected_ids = {e.flight_id for e in selected.residual_events}
@@ -254,17 +269,17 @@ def register_callbacks(app, G, df, positions):
 
 # ── Figure builders ────────────────────────────────────────────────────────────
 
-def _node_color(flight_id: str, df_current: pd.DataFrame,
-                trigger_id: str | None, affected_ids: set | None) -> str:
+def _node_color(
+    flight_id: str,
+    status_by_flight: dict,
+    trigger_id: str | None,
+    affected_ids: set | None,
+) -> str:
     """Return fill color for a graph node based on current status."""
     if affected_ids is None:
         affected_ids = set()
 
-    status_row = df_current[df_current["flight_id"] == flight_id]
-    if status_row.empty:
-        return COLORS["normal"]
-
-    status = status_row.iloc[0].get("status", "scheduled")
+    status = status_by_flight.get(flight_id, "scheduled")
 
     if flight_id == trigger_id:      return COLORS["trigger"]
     if status == "critical":         return COLORS["critical"]
@@ -284,6 +299,11 @@ def _build_network_fig(
     """Render the flight dependency network as a Plotly figure."""
     if affected_ids is None:
         affected_ids = set()
+    highlighted_nodes = set(affected_ids)
+    if trigger_id:
+        highlighted_nodes.add(trigger_id)
+    status_by_flight = dict(zip(df["flight_id"], df["status"]))
+    def_x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
 
     # ── Edges ──────────────────────────────────────────────────────────────────
     edge_traces = []
@@ -293,22 +313,19 @@ def _build_network_fig(
         ("PAX_CNXN", COLORS["gold"],  "dash"),
     ]:
         ex, ey = [], []
+        has_highlight = False
         for u, v, d in G.edges(data=True):
             if d.get("edge_type") != edge_type:
                 continue
-            def_x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
             x0, y0 = positions.get(u, (def_x, 0))
             x1, y1 = positions.get(v, (def_x, 0))
             ex += [x0, x1, None]
             ey += [y0, y1, None]
+            if u in highlighted_nodes or v in highlighted_nodes:
+                has_highlight = True
 
         if ex:
-            def_x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
-            opacity = 0.9 if (trigger_id and any(
-                G.has_edge(u, v) and (u == trigger_id or v == trigger_id or
-                           u in affected_ids or v in affected_ids)
-                for u, v, d in G.edges(data=True) if d.get("edge_type") == edge_type
-            )) else 0.25
+            opacity = 0.9 if (trigger_id and has_highlight) else 0.25
 
             edge_traces.append(go.Scatter(
                 x=ex, y=ey, mode="lines",
@@ -322,13 +339,12 @@ def _build_network_fig(
     node_x, node_y, node_color, node_size = [], [], [], []
     node_text, node_hover = [], []
 
-    def_x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
     for flight_id, data in G.nodes(data=True):
         x, y = positions.get(flight_id, (def_x, 0))
         node_x.append(x)
         node_y.append(y)
 
-        color = _node_color(flight_id, df, trigger_id, affected_ids)
+        color = _node_color(flight_id, status_by_flight, trigger_id, affected_ids)
         node_color.append(color)
 
         # Size = proportional to pax count
@@ -732,8 +748,10 @@ def register_phase3_callbacks(app, G, df):
     from engine.recovery import evaluate_all_recovery_options
     from engine.cascade import run_cascade
     from engine.pdf_report import generate_pdf_report
+    from engine.config import MC_SCENARIOS
     import plotly.graph_objects as go
-    import json, os, base64, tempfile
+    import json, os, tempfile
+    from types import SimpleNamespace
     from dash import Input, Output, State, html, dcc
     from dash.exceptions import PreventUpdate
 
@@ -744,14 +762,22 @@ def register_phase3_callbacks(app, G, df):
         Output("mc-network-stats", "children"),
         Output("mc-result-store",  "data"),
         Input("mc-run-btn", "n_clicks"),
-        prevent_initial_call=True
+        prevent_initial_call=True,
+        running=[(Output("mc-run-btn", "disabled"), True, False)],
     )
     def run_mc(n_clicks):
         if not n_clicks:
             raise PreventUpdate
 
-        mc = run_monte_carlo(G, df, n_scenarios=500)
+        mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
         ns = mc.network_summary
+        if ns is None:
+            return (
+                html.Div("Monte Carlo failed to produce scenarios.", className="log-empty"),
+                [],
+                html.Div(),
+                None,
+            )
 
         # ── Status bar ──────────────────────────────────────────────────────
         status = html.Div(className="mc-status-done", children=[
@@ -962,7 +988,8 @@ def register_phase3_callbacks(app, G, df):
         State("flight-select",   "value"),
         State("delay-slider",    "value"),
         State("mc-result-store", "data"),
-        prevent_initial_call=True
+        prevent_initial_call=True,
+        running=[(Output("pdf-export-btn", "disabled"), True, False)],
     )
     def export_pdf(n_clicks, cascade_store, flight_id, delay_min, mc_store):
         if not n_clicks:
@@ -994,9 +1021,45 @@ def register_phase3_callbacks(app, G, df):
             for o in options
         ]
 
-        # Re-run MC if no stored result (lightweight)
-        from engine.monte_carlo import run_monte_carlo, MonteCarloResult
-        mc = run_monte_carlo(G, df, n_scenarios=500)
+        if mc_store:
+            mc_payload = json.loads(mc_store)
+            ns = SimpleNamespace(
+                n_scenarios=mc_payload.get("n_scenarios", 0),
+                mean_flights_affected=mc_payload.get("mean_flights_affected", 0.0),
+                p50_flights_affected=mc_payload.get("p50_flights_affected", 0.0),
+                p90_flights_affected=mc_payload.get("p90_flights_affected", 0.0),
+                p99_flights_affected=mc_payload.get("p99_flights_affected", 0.0),
+                mean_cost_usd=mc_payload.get("mean_cost_usd", 0.0),
+                p50_cost_usd=mc_payload.get("p50_cost_usd", 0.0),
+                p90_cost_usd=mc_payload.get("p90_cost_usd", 0.0),
+                p99_cost_usd=mc_payload.get("p99_cost_usd", 0.0),
+                mean_total_delay=mc_payload.get("mean_total_delay", 0.0),
+                p90_total_delay=mc_payload.get("p90_total_delay", 0.0),
+                zero_cascade_pct=mc_payload.get("zero_cascade_pct", 0.0),
+                critical_scenario_pct=mc_payload.get("critical_scenario_pct", 0.0),
+                top_triggers=mc_payload.get("top_triggers", []),
+            )
+            risk_profiles = {
+                fid: SimpleNamespace(
+                    risk_label=p.get("risk_label", "LOW"),
+                    risk_score=p.get("risk_score", 0.0),
+                    victim_probability=p.get("victim_probability", 0.0),
+                    trigger_avg_cost=p.get("trigger_avg_cost", 0.0),
+                    direction=p.get("direction", ""),
+                    origin=p.get("origin", ""),
+                    destination=p.get("destination", ""),
+                    aircraft_type=p.get("aircraft_type", ""),
+                )
+                for fid, p in mc_payload.get("risk_profiles", {}).items()
+            }
+            mc = SimpleNamespace(
+                n_scenarios=ns.n_scenarios,
+                network_summary=ns,
+                risk_profiles=risk_profiles,
+            )
+        else:
+            from engine.monte_carlo import run_monte_carlo
+            mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             path = tmp.name

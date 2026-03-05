@@ -48,6 +48,91 @@ CREW_ASSIGNMENTS = {
 }
 
 
+REQUIRED_COLUMNS = {
+    "flight_id",
+    "direction",
+    "origin",
+    "destination",
+    "aircraft_reg",
+    "aircraft_type",
+    "crew_id",
+    "seats",
+    "load_factor",
+    "pax",
+    "arr_scheduled",
+    "arr_actual",
+    "dep_scheduled",
+    "dep_actual",
+    "arr_delay_min",
+    "dep_delay_min",
+    "status",
+    "block_time_h",
+}
+
+
+def _fallback_for_open_sky(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize OpenSky arrivals-only payload into internal schema.
+    This preserves real arrivals while avoiding KeyError crashes downstream.
+    """
+    if df.empty:
+        return df
+
+    fleet_regs = list(QR_FLEET.keys())
+    crews = list(CREW_ASSIGNMENTS.values())
+
+    normalized = df.copy()
+    normalized["flight_id"] = normalized["flight_id"].fillna("QTRUNK").astype(str)
+    normalized["direction"] = "inbound"
+    normalized["origin"] = normalized.get("origin", "UNKN").fillna("UNKN")
+    normalized["destination"] = normalized.get("destination", OTHH).fillna(OTHH)
+
+    # OpenSky often returns transponder hex in icao24; map unknown/non-QR regs to representative fleet regs.
+    regs_series = normalized["aircraft_reg"] if "aircraft_reg" in normalized.columns else pd.Series([None] * len(normalized))
+    mapped_regs = []
+    for idx, reg in enumerate(regs_series):
+        reg_str = str(reg).upper() if pd.notna(reg) else ""
+        if reg_str in QR_FLEET:
+            mapped_regs.append(reg_str)
+        else:
+            mapped_regs.append(fleet_regs[idx % len(fleet_regs)])
+    normalized["aircraft_reg"] = mapped_regs
+
+    normalized["aircraft_type"] = normalized["aircraft_reg"].map(lambda r: QR_FLEET[r]["type"])
+    normalized["crew_id"] = [crews[i % len(crews)] for i in range(len(normalized))]
+    normalized["seats"] = normalized["aircraft_reg"].map(lambda r: QR_FLEET[r]["seats"])
+    normalized["load_factor"] = 0.85
+    normalized["pax"] = (normalized["seats"] * normalized["load_factor"]).astype(int)
+
+    normalized["arr_scheduled"] = normalized.get("arr_scheduled", normalized["arr_actual"])
+    normalized["arr_actual"] = pd.to_datetime(normalized["arr_actual"], utc=True, errors="coerce")
+    normalized["arr_scheduled"] = pd.to_datetime(normalized["arr_scheduled"], utc=True, errors="coerce")
+    normalized["dep_scheduled"] = pd.NaT
+    normalized["dep_actual"] = pd.NaT
+    normalized["arr_delay_min"] = (
+        (normalized["arr_actual"] - normalized["arr_scheduled"]).dt.total_seconds() / 60
+    ).fillna(0.0).round(1)
+    normalized["dep_delay_min"] = 0.0
+    normalized["status"] = "landed"
+    normalized["block_time_h"] = 6.0
+    normalized["turnaround_slack_min"] = 0.0
+    return normalized
+
+
+def _schedule_is_usable(df: pd.DataFrame) -> bool:
+    """
+    Return True only if schedule supports dependency construction.
+    Current model requires both inbound and outbound flights.
+    """
+    if df is None or df.empty:
+        return False
+    if not REQUIRED_COLUMNS.issubset(df.columns):
+        return False
+    has_inbound = (df["direction"] == "inbound").any()
+    has_outbound = (df["direction"] == "outbound").any()
+    return bool(has_inbound and has_outbound)
+
+
 def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
     """
     Pull real arrival data from OpenSky Network for DOH.
@@ -85,7 +170,9 @@ def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
                 "direction":     "inbound",
             })
 
-        return pd.DataFrame(flights) if flights else None
+        if not flights:
+            return None
+        return _fallback_for_open_sky(pd.DataFrame(flights))
 
     except Exception as exc:
         logger.warning("OpenSky unavailable (%s). Using synthetic data.", exc)
@@ -241,9 +328,15 @@ def load_schedule(date: datetime | None = None, use_opensky: bool = True) -> pd.
 
     if use_opensky:
         df = fetch_from_opensky(date)
-        if df is not None and len(df) > 5:
+        if df is not None and len(df) > 5 and _schedule_is_usable(df):
             logger.info("Loaded %d flights from OpenSky.", len(df))
             return df
-        logger.info("Using synthetic schedule.")
+        if df is not None and len(df) > 0:
+            logger.info(
+                "OpenSky payload incomplete for cascade model (arrivals-only or missing fields). "
+                "Using synthetic schedule."
+            )
+        else:
+            logger.info("Using synthetic schedule.")
 
     return build_synthetic_schedule(date)

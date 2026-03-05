@@ -179,6 +179,9 @@ def run_monte_carlo(
 
     Returns MonteCarloResult with per-flight risk profiles and network summary.
     """
+    if n_scenarios <= 0:
+        raise ValueError("n_scenarios must be > 0.")
+
     t0  = time.time()
     rng = np.random.default_rng(seed)
     sample_delay = _build_delay_sampler(rng)
@@ -201,6 +204,7 @@ def run_monte_carlo(
     # Per-flight accumulators
     trigger_cascades : dict[str, list] = {fid: [] for fid in inbound_ids}   # cascade costs when triggered
     victim_hits      : dict[str, int]  = {n: 0 for n in G.nodes()}          # times hit as victim
+    victim_delay_totals: dict[str, float] = {n: 0.0 for n in G.nodes()}
 
     for i in range(n_scenarios):
         # Sample trigger and delay
@@ -236,10 +240,14 @@ def run_monte_carlo(
         for event in result.events:
             if event.flight_id in victim_hits:
                 victim_hits[event.flight_id] += 1
+                victim_delay_totals[event.flight_id] += float(event.delay_min)
 
         # Progress callback (for UI progress bar)
         if progress_callback and i % 50 == 0:
             progress_callback(int(i / n_scenarios * 100))
+
+    if progress_callback:
+        progress_callback(100)
 
     runtime = time.time() - t0
     logger.info("Monte Carlo complete: %d scenarios in %.2fs", len(scenarios), runtime)
@@ -278,13 +286,7 @@ def run_monte_carlo(
         profile.victim_count       = hit_count
         profile.victim_probability = hit_count / max(n, 1)
         if hit_count > 0:
-            hit_delays = [
-                e.delay_min
-                for s in scenarios
-                for e in []   # placeholder — we don't store per-event in scenarios
-            ]
-            # Approximate avg delay from cost (cost ≈ delay * rate)
-            profile.victim_avg_delay = 0.0   # populated below
+            profile.victim_avg_delay = float(victim_delay_totals.get(flight_id, 0.0) / hit_count)
 
         # Risk score: weighted combination
         # - As trigger: how bad are cascades you cause?
@@ -318,7 +320,7 @@ def run_monte_carlo(
 
         high_risk = [
             fid for fid, p in risk_profiles.items()
-            if p.risk_label in ("HIGH", "CRITICAL")
+            if p.risk_score >= MC_HIGH_RISK_THRESHOLD
         ]
 
         summary = NetworkRiskSummary(

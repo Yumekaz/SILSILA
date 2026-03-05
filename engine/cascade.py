@@ -163,6 +163,7 @@ def run_cascade(
     # BFS queue: (flight_id, delay_minutes, depth, path_so_far)
     queue   = deque([(trigger_flight_id, trigger_delay_min, 0, [trigger_flight_id])])
     visited = {}  # flight_id → max delay seen (so we always keep worst case)
+    events_by_flight = {}
 
     visited[trigger_flight_id] = trigger_delay_min
 
@@ -207,18 +208,22 @@ def run_cascade(
             )
             event.severity = event.severity_label()
 
-            result.events.append(event)
-            result.total_delay_min   += propagated_delay
-            result.total_pax_affected = max(result.total_pax_affected, pax)
-            result.total_pax_stranded += stranded_pax
-            result.total_cost_usd    += cost
+            # Keep one event per affected flight, retaining worst-case propagated delay.
+            prev = events_by_flight.get(neighbor_id)
+            if prev is None or event.delay_min >= prev.delay_min:
+                events_by_flight[neighbor_id] = event
+
             result.max_depth          = max(result.max_depth, depth + 1)
 
             new_path = path + [neighbor_id]
             queue.append((neighbor_id, propagated_delay, depth + 1, new_path))
 
-    # Sort events by delay (worst first)
-    result.events.sort(key=lambda e: e.delay_min, reverse=True)
+    # Finalize aggregate metrics from deduplicated events.
+    result.events = sorted(events_by_flight.values(), key=lambda e: e.delay_min, reverse=True)
+    result.total_delay_min = sum(e.delay_min for e in result.events)
+    result.total_pax_affected = sum(e.pax_affected for e in result.events)
+    result.total_pax_stranded = sum(e.pax_stranded for e in result.events)
+    result.total_cost_usd = sum(e.cost_usd for e in result.events)
 
     logger.info(
         "Cascade from %s (+%d min): %d flights affected, "

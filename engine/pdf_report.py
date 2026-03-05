@@ -14,22 +14,17 @@ Sections:
 Uses ReportLab (pure Python, no browser dependency).
 """
 
-import io
-import os
 from datetime import datetime, timezone
-from typing import Optional
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    HRFlowable, PageBreak, KeepTogether,
+    HRFlowable, PageBreak,
 )
-from reportlab.platypus.flowables import HRFlowable
-from reportlab.pdfgen import canvas as pdfcanvas
 
 # ── Brand colours ──────────────────────────────────────────────────────────────
 C_NAVY   = colors.HexColor("#0C1220")

@@ -13,6 +13,7 @@ Structure:
 
 from dash import dcc, html
 import plotly.graph_objects as go
+from engine.config import MC_SCENARIOS
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ def build_control_panel(flight_options: list) -> html.Div:
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("DISRUPTION INPUT", className="panel-title"),
-            html.Span("PHASE 1", className="panel-badge"),
+            html.Span("PHASE 3", className="panel-badge"),
         ]),
         html.Div(className="panel-body", children=[
 
@@ -179,16 +180,22 @@ def build_network_panel() -> html.Div:
             ]),
         ]),
         html.Div(className="graph-container", children=[
-            dcc.Graph(
-                id="network-graph",
-                figure=empty_network_fig(),
-                config={
-                    "displayModeBar": True,
-                    "displaylogo": False,
-                    "scrollZoom": True,
-                    "modeBarButtonsToRemove": ["lasso2d", "select2d", "zoom2d"]
-                },
-                style={"height": "100%", "width": "100%"},
+            dcc.Loading(
+                type="dot",
+                color="#00C8FF",
+                children=[
+                    dcc.Graph(
+                        id="network-graph",
+                        figure=empty_network_fig(),
+                        config={
+                            "displayModeBar": True,
+                            "displaylogo": False,
+                            "scrollZoom": True,
+                            "modeBarButtonsToRemove": ["lasso2d", "select2d", "zoom2d"]
+                        },
+                        style={"height": "100%", "width": "100%"},
+                    ),
+                ]
             ),
         ]),
     ])
@@ -223,11 +230,17 @@ def build_gantt_panel() -> html.Div:
             html.Span("GANTT", className="panel-badge"),
         ]),
         html.Div(className="gantt-container", children=[
-            dcc.Graph(
-                id="gantt-chart",
-                figure=empty_gantt_fig(),
-                config={"displayModeBar": False},
-                style={"height": "200px"},
+            dcc.Loading(
+                type="dot",
+                color="#E8A020",
+                children=[
+                    dcc.Graph(
+                        id="gantt-chart",
+                        figure=empty_gantt_fig(),
+                        config={"displayModeBar": False},
+                        style={"height": "200px"},
+                    ),
+                ]
             ),
         ]),
     ])
@@ -268,7 +281,7 @@ def build_monte_carlo_panel() -> html.Div:
             html.Span("MONTE CARLO RISK ANALYSIS", className="panel-title"),
             html.Div([
                 html.Span("PHASE 3", className="panel-badge", style={"marginRight": "6px"}),
-                html.Span("500 SCENARIOS", className="panel-badge",
+                html.Span(f"{MC_SCENARIOS} SCENARIOS", className="panel-badge",
                           style={"marginRight": "6px"}),
                 html.Button(
                     "▶  RUN MONTE CARLO",

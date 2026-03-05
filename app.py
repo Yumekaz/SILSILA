@@ -7,6 +7,7 @@ Open: http://localhost:8050
 """
 
 import logging
+import os
 import warnings
 from datetime import datetime, timezone
 
@@ -81,7 +82,8 @@ def main():
     logger.info("  http://localhost:8050")
     logger.info("─" * 60)
 
-    app.run(debug=True, host="0.0.0.0", port=8050)
+    debug_mode = os.getenv("DASH_DEBUG", "0") == "1"
+    app.run(debug=debug_mode, host="0.0.0.0", port=8050)
 
 
 if __name__ == "__main__":
