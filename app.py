@@ -32,26 +32,11 @@ logger = logging.getLogger("app")
 cyto.load_extra_layouts()
 
 
-def main():
-    # ── Load schedule ──────────────────────────────────────────────────────────
-    logger.info("Loading DOH schedule …")
-    today = datetime.now(tz=timezone.utc)
-    df    = load_schedule(date=today, use_opensky=USE_OPENSKY_BY_DEFAULT)
-    logger.info("Schedule: %d flights", len(df))
-
-    # ── Build dependency graph ─────────────────────────────────────────────────
-    logger.info("Building dependency graph …")
-    G = build_graph(df)
-    summary = graph_summary(G)
-    logger.info(
-        "Graph: %d nodes, %d edges  (%s)",
-        summary["nodes"], summary["edges"],
-        " | ".join(f"{k}:{v}" for k, v in summary["edge_types"].items())
-    )
-
-    # ── Build flight selector options ──────────────────────────────────────────
+def build_flight_options(df: pd.DataFrame, inbound_only: bool = True) -> list[dict]:
+    """Build trigger options for the control panel."""
     flight_options = []
-    for _, row in df.sort_values("flight_id").iterrows():
+    source_df = df[df["direction"] == "inbound"] if inbound_only else df
+    for _, row in source_df.sort_values("flight_id").iterrows():
         direction = "↓ IN" if row["direction"] == "inbound" else "↑ OUT"
         origin    = row["origin"]
         dest      = row["destination"]
@@ -60,8 +45,13 @@ def main():
         time_str  = ref_time.strftime("%H:%M") if pd.notna(ref_time) else "--:--"
         label     = f"{row['flight_id']}  {direction}  {origin}→{dest}  {time_str}"
         flight_options.append({"label": label, "value": row["flight_id"]})
+    return flight_options
 
-    # ── Initialise Dash ────────────────────────────────────────────────────────
+
+def create_app(df: pd.DataFrame, G):
+    """Initialise and wire the Dash application."""
+    flight_options = build_flight_options(df, inbound_only=True)
+
     app = dash.Dash(
         __name__,
         title="SILSILA · DOH",
@@ -77,6 +67,30 @@ def main():
     # Register callbacks — no positions arg needed now (Cytoscape handles layout)
     register_callbacks(app, G, df)
     register_phase3_callbacks(app, G, df)
+    return app
+
+
+def load_runtime_context():
+    """Load schedule and graph used by both local runs and deployment."""
+    logger.info("Loading DOH schedule …")
+    today = datetime.now(tz=timezone.utc)
+    df = load_schedule(date=today, use_opensky=USE_OPENSKY_BY_DEFAULT)
+    logger.info("Schedule: %d flights", len(df))
+
+    logger.info("Building dependency graph …")
+    graph = build_graph(df)
+    summary = graph_summary(graph)
+    logger.info(
+        "Graph: %d nodes, %d edges  (%s)",
+        summary["nodes"], summary["edges"],
+        " | ".join(f"{k}:{v}" for k, v in summary["edge_types"].items())
+    )
+    return df, graph
+
+
+def main():
+    df, G = load_runtime_context()
+    app = create_app(df, G)
 
     logger.info("─" * 60)
     logger.info("  SILSILA  ·  Cytoscape Ops Dashboard")
@@ -94,3 +108,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+else:
+    _df, _graph = load_runtime_context()
+    app = create_app(_df, _graph)
+    server = app.server

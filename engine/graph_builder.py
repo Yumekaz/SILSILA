@@ -32,6 +32,14 @@ def build_graph(df: pd.DataFrame) -> nx.DiGraph:
       - Nodes carry full flight metadata
       - Edges carry type, constraint values, and vulnerability weight
     """
+    return build_graph_with_constraints(df, min_turnaround_minutes=MIN_TURNAROUND_MINUTES)
+
+
+def build_graph_with_constraints(
+    df: pd.DataFrame,
+    min_turnaround_minutes: float = MIN_TURNAROUND_MINUTES,
+) -> nx.DiGraph:
+    """Build a graph with a configurable minimum turnaround assumption."""
     G = nx.DiGraph()
 
     # ── Add nodes ─────────────────────────────────────────────────────────────
@@ -83,7 +91,7 @@ def build_graph(df: pd.DataFrame) -> nx.DiGraph:
                 continue
 
             # Turnaround slack: how many buffer minutes exist above the minimum
-            slack_min = (dep_scheduled - arr_actual).total_seconds() / 60 - MIN_TURNAROUND_MINUTES
+            slack_min = (dep_scheduled - arr_actual).total_seconds() / 60 - min_turnaround_minutes
 
             # Vulnerability: tight turnaround = high vulnerability
             vulnerability = max(0.0, min(1.0, 1.0 - (slack_min / 90.0)))
@@ -94,7 +102,7 @@ def build_graph(df: pd.DataFrame) -> nx.DiGraph:
                 edge_type="ROTATION",
                 aircraft_reg=inb["aircraft_reg"],
                 slack_min=round(slack_min, 1),
-                min_required_min=MIN_TURNAROUND_MINUTES,
+                min_required_min=min_turnaround_minutes,
                 vulnerability=round(vulnerability, 3),
                 label=f"Rotation {inb['aircraft_reg']} | slack {slack_min:.0f}m",
             )

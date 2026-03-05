@@ -6,12 +6,14 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from app import build_flight_options
 from engine.data_loader import REQUIRED_COLUMNS, load_schedule
 from engine.graph_builder import build_graph, graph_summary
 from engine.cascade import run_cascade, cascaded_schedule
 from engine.recovery import evaluate_all_recovery_options
 from engine.monte_carlo import run_monte_carlo, build_heatmap_data
 from engine.pdf_report import generate_pdf_report
+from engine.sensitivity import run_turnaround_sensitivity
 from ui.session_state import (
     deserialize_cascade_store,
     deserialize_mc_store,
@@ -36,6 +38,15 @@ def test_schedule_has_required_schema(schedule_df):
     assert REQUIRED_COLUMNS.issubset(schedule_df.columns)
     assert (schedule_df["direction"] == "inbound").any()
     assert (schedule_df["direction"] == "outbound").any()
+
+
+def test_flight_options_are_inbound_only(schedule_df):
+    options = build_flight_options(schedule_df, inbound_only=True)
+    option_ids = {option["value"] for option in options}
+    outbound_ids = set(schedule_df.loc[schedule_df["direction"] == "outbound", "flight_id"])
+
+    assert options
+    assert option_ids.isdisjoint(outbound_ids)
 
 
 def test_graph_builds_and_has_core_edge_types(dependency_graph):
@@ -265,3 +276,16 @@ def test_recovery_options_serialize_for_export(schedule_df, dependency_graph):
     assert len(restored) == 3
     assert {item["strategy"] for item in restored} == {"SWAP", "DELAY", "CANCEL"}
     assert all("label" in item and "score" in item for item in restored)
+
+
+def test_turnaround_sensitivity_returns_ordered_scenarios(schedule_df):
+    points = run_turnaround_sensitivity(
+        schedule_df,
+        trigger_ids=["QR007", "QR021"],
+        trigger_delay_min=60.0,
+        min_turnaround_values=[35.0, 45.0, 55.0],
+    )
+
+    assert [point.min_turnaround_min for point in points] == [35.0, 45.0, 55.0]
+    assert all(point.scenario_count == 2 for point in points)
+    assert points[-1].mean_flights_affected >= points[0].mean_flights_affected

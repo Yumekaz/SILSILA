@@ -47,6 +47,10 @@ Recently improved:
 - callback state serialization
 - stronger graph and schedule behavior tests
 - callback code split by feature area
+- inbound-only trigger selection
+- backend turnaround sensitivity analysis
+- formal repo-side SE documentation package
+- Render deployment scaffolding
 
 ## Architecture
 
@@ -153,6 +157,31 @@ The current test suite covers:
 - Monte Carlo output shape
 - PDF generation smoke path
 - session-state serialization helpers
+- turnaround sensitivity-analysis outputs
+
+## Documentation Package
+
+Additional systems-engineering documents now live in [`docs/`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs):
+
+- [`requirements.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/requirements.md)
+- [`functional_decomposition.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/functional_decomposition.md)
+- [`data_dictionary.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/data_dictionary.md)
+- [`ui_spec.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/ui_spec.md)
+- [`fmea.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/fmea.md)
+- [`verification_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/verification_validation.md)
+- [`historical_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/historical_validation.md)
+- [`deployment.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/deployment.md)
+- [`demo_assets.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/demo_assets.md)
+
+## Still Partial
+
+These project-bible items are still only partial after this pass:
+
+- sensitivity analysis exists as a backend module, not yet as a dashboard feature
+- historical validation is documented as a framework, not completed with public case data
+- deployment config is included, but no live deployed URL is part of the repo
+- demo-assets structure exists, but curated screenshots/video are not yet added
+- recovery remains heuristic scoring, not a true optimization engine
 
 ## Key Files
 

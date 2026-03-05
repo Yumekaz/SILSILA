@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: silsila-doha-cascade
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:server
