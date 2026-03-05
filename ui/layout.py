@@ -6,12 +6,13 @@ Defines the full Dash application layout.
 Structure:
   Header  — branding, live clock, system status
   Left    — control panel (flight select, delay slider, trigger)
-  Center  — NetworkX graph rendered via Plotly
+  Center  — Cytoscape.js network graph (smooth zoom/pan)
   Right   — cascade event log + aggregate metrics
   Bottom  — Gantt timeline (original vs cascaded schedule)
 """
 
 from dash import dcc, html
+import dash_cytoscape as cyto
 import plotly.graph_objects as go
 from engine.config import MC_SCENARIOS
 
@@ -93,7 +94,7 @@ def build_control_panel(flight_options: list) -> html.Div:
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("DISRUPTION INPUT", className="panel-title"),
-            html.Span("PHASE 3", className="panel-badge"),
+            html.Span("PHASE 1", className="panel-badge"),
         ]),
         html.Div(className="panel-body", children=[
 
@@ -176,26 +177,27 @@ def build_network_panel() -> html.Div:
                                  "background": "rgba(0,212,160,0.07)", "marginRight": "6px"}),
                 html.Span("▸ PAX CNX", className="tag",
                           style={"color": "#E8A020", "borderColor": "#9B6B14",
-                                 "background": "rgba(232,160,32,0.07)"}),
+                                 "background": "rgba(232,160,32,0.07)", "marginRight": "10px"}),
+                # Node info tooltip (populated on click)
+                html.Span(id="cyto-node-info", style={
+                    "fontFamily": "JetBrains Mono", "fontSize": "10px",
+                    "color": "#4A6080", "letterSpacing": "0.05em"
+                }),
             ]),
         ]),
         html.Div(className="graph-container", children=[
-            dcc.Loading(
-                type="dot",
-                color="#00C8FF",
-                children=[
-                    dcc.Graph(
-                        id="network-graph",
-                        figure=empty_network_fig(),
-                        config={
-                            "displayModeBar": True,
-                            "displaylogo": False,
-                            "scrollZoom": True,
-                            "modeBarButtonsToRemove": ["lasso2d", "select2d", "zoom2d"]
-                        },
-                        style={"height": "100%", "width": "100%"},
-                    ),
-                ]
+            cyto.Cytoscape(
+                id="network-graph",
+                layout={"name": "preset"},
+                style={"height": "100%", "width": "100%",
+                       "background": "#06090F"},
+                elements=[],
+                stylesheet=[],   # populated by callback
+                userZoomingEnabled=True,
+                userPanningEnabled=True,
+                minZoom=0.2,
+                maxZoom=3.0,
+                responsive=True,
             ),
         ]),
     ])
@@ -230,17 +232,11 @@ def build_gantt_panel() -> html.Div:
             html.Span("GANTT", className="panel-badge"),
         ]),
         html.Div(className="gantt-container", children=[
-            dcc.Loading(
-                type="dot",
-                color="#E8A020",
-                children=[
-                    dcc.Graph(
-                        id="gantt-chart",
-                        figure=empty_gantt_fig(),
-                        config={"displayModeBar": False},
-                        style={"height": "200px"},
-                    ),
-                ]
+            dcc.Graph(
+                id="gantt-chart",
+                figure=empty_gantt_fig(),
+                config={"displayModeBar": False},
+                style={"height": "200px"},
             ),
         ]),
     ])
@@ -302,7 +298,7 @@ def build_monte_carlo_panel() -> html.Div:
         html.Div(id="mc-status-bar", className="mc-status-bar", children=[
             html.Div(className="log-empty", style={"height": "60px"}, children=[
                 html.Div("◈", className="icon"),
-                html.Div("MONTE CARLO READY — click RUN to simulate 500 scenarios",
+                html.Div(f"MONTE CARLO READY — click RUN to simulate {MC_SCENARIOS} scenarios",
                          style={"textTransform": "none", "letterSpacing": "0"}),
             ])
         ]),

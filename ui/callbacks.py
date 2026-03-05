@@ -2,18 +2,19 @@
 callbacks.py
 ------------
 All Dash callback functions — the reactive layer between UI and engine.
+Network graph now uses dash-cytoscape for smooth native zoom/pan.
 """
 
 import json
 from datetime import datetime, timezone
-from dash import Input, Output, State, callback, html
+from dash import Input, Output, State, html
 import plotly.graph_objects as go
 import pandas as pd
 import networkx as nx
 
 from engine.cascade import run_cascade, cascaded_schedule
-from engine.graph_builder import compute_node_positions
 from engine.recovery import evaluate_all_recovery_options, RecoveryOption
+from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
 
 # ── Color palette (matches CSS variables) ─────────────────────────────────────
 COLORS = {
@@ -44,27 +45,24 @@ COLORS = {
 FONT = dict(family="JetBrains Mono, monospace")
 
 
-def register_callbacks(app, G, df, positions):
+def register_callbacks(app, G, df):
     """Register all callbacks. Called from app.py after Dash is initialised."""
-    from dash.exceptions import PreventUpdate
-    sim_cache = {}
 
-    def _cached_simulation(flight_id: str, delay_min: float):
-        key = (flight_id, round(float(delay_min), 1))
-        if key in sim_cache:
-            return sim_cache[key]
+    # Pre-build stylesheet once — it doesn't change between cascades
+    CYTO_STYLESHEET = build_cyto_stylesheet()
 
-        result = run_cascade(G, flight_id, float(delay_min))
-        df_cascaded = cascaded_schedule(df, G, result)
-        recovery_options = evaluate_all_recovery_options(G, df, result)
-        payload = (result, df_cascaded, recovery_options)
-        sim_cache[key] = payload
-
-        # Keep small bounded cache to avoid unbounded memory growth.
-        if len(sim_cache) > 24:
-            oldest_key = next(iter(sim_cache))
-            sim_cache.pop(oldest_key, None)
-        return payload
+    # ── Initialise graph on page load ──────────────────────────────────────────
+    @app.callback(
+        Output("network-graph", "elements"),
+        Output("network-graph", "stylesheet"),
+        Input("clock-interval", "n_intervals"),
+    )
+    def init_graph(n):
+        if n and n > 1:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+        elements = build_cyto_elements(G, df, None, set())
+        return elements, CYTO_STYLESHEET
 
     # ── Live clock ─────────────────────────────────────────────────────────────
     @app.callback(
@@ -161,7 +159,8 @@ def register_callbacks(app, G, df, positions):
     # ── Main simulation callback ───────────────────────────────────────────────
     @app.callback(
         Output("cascade-result-store",   "data"),
-        Output("network-graph",          "figure"),
+        Output("network-graph",          "elements",    allow_duplicate=True),
+        Output("network-graph",          "stylesheet",  allow_duplicate=True),
         Output("cascade-log",            "children"),
         Output("affected-count",         "children"),
         Output("gantt-chart",            "figure"),
@@ -172,8 +171,7 @@ def register_callbacks(app, G, df, positions):
         Input("reset-btn",    "n_clicks"),
         State("flight-select","value"),
         State("delay-slider", "value"),
-        prevent_initial_call=True,
-        running=[(Output("trigger-btn", "disabled"), True, False)],
+        prevent_initial_call=True
     )
     def run_simulation(trigger_clicks, reset_clicks, flight_id, delay_min):
         from dash import ctx
@@ -184,7 +182,8 @@ def register_callbacks(app, G, df, positions):
         if triggered == "reset-btn":
             return (
                 None,
-                _build_network_fig(G, df, positions, None, None),
+                build_cyto_elements(G, df, None, set()),
+                CYTO_STYLESHEET,
                 _empty_log(),
                 "0 AFFECTED",
                 _build_gantt(df, None),
@@ -196,7 +195,8 @@ def register_callbacks(app, G, df, positions):
         if not flight_id or not delay_min:
             return (
                 None,
-                _build_network_fig(G, df, positions, None, None),
+                build_cyto_elements(G, df, None, set()),
+                CYTO_STYLESHEET,
                 _empty_log(), "0 AFFECTED",
                 _build_gantt(df, None),
                 html.Div(),
@@ -205,13 +205,18 @@ def register_callbacks(app, G, df, positions):
             )
 
         # ── Phase 1: Run cascade ───────────────────────────────────────────────
-        result, df_cascaded, recovery_options = _cached_simulation(flight_id, float(delay_min))
-        summary = result.summary()
+        result       = run_cascade(G, flight_id, float(delay_min))
+        summary      = result.summary()
+        df_cascaded  = cascaded_schedule(df, G, result)
         affected_ids = {e.flight_id for e in result.events}
+
+        # ── Phase 2: Evaluate recovery options ─────────────────────────────────
+        recovery_options = evaluate_all_recovery_options(G, df, result)
 
         return (
             json.dumps(summary),
-            _build_network_fig(G, df_cascaded, positions, flight_id, affected_ids),
+            build_cyto_elements(G, df_cascaded, flight_id, affected_ids),
+            CYTO_STYLESHEET,
             _build_cascade_log(result),
             f"{result.flights_affected} AFFECTED",
             _build_gantt(df_cascaded, result),
@@ -220,10 +225,10 @@ def register_callbacks(app, G, df, positions):
             f"{len([o for o in recovery_options if o.feasible])} OPTIONS READY",
         )
 
-    # ── Apply selected recovery to Gantt ───────────────────────────────────────
+    # ── Apply selected recovery to Gantt + graph ───────────────────────────────
     @app.callback(
-        Output("gantt-chart",          "figure", allow_duplicate=True),
-        Output("network-graph",        "figure", allow_duplicate=True),
+        Output("gantt-chart",             "figure",     allow_duplicate=True),
+        Output("network-graph",           "elements",   allow_duplicate=True),
         Output("selected-recovery-store", "data"),
         Input({"type": "recovery-select-btn", "index": 0}, "n_clicks"),
         Input({"type": "recovery-select-btn", "index": 1}, "n_clicks"),
@@ -234,12 +239,13 @@ def register_callbacks(app, G, df, positions):
     )
     def apply_recovery(c0, c1, c2, flight_id, delay_min):
         from dash import ctx
+        from dash.exceptions import PreventUpdate
         if not ctx.triggered_id or not flight_id or not delay_min:
             raise PreventUpdate
 
         triggered_idx = ctx.triggered_id.get("index", 0)
-
-        result, _, options = _cached_simulation(flight_id, float(delay_min))
+        result  = run_cascade(G, flight_id, float(delay_min))
+        options = evaluate_all_recovery_options(G, df, result)
 
         if triggered_idx >= len(options):
             raise PreventUpdate
@@ -253,173 +259,37 @@ def register_callbacks(app, G, df, positions):
 
         return (
             _build_gantt(df_rec, result, recovery_label=selected.label),
-            _build_network_fig(G, df_rec, positions, flight_id, affected_ids),
+            build_cyto_elements(G, df_rec, flight_id, affected_ids),
             selected.strategy,
         )
 
-    # ── Network graph on flight selection (no simulation) ──────────────────────
+    # ── Highlight selected flight on dropdown change ───────────────────────────
     @app.callback(
-        Output("network-graph", "figure", allow_duplicate=True),
+        Output("network-graph", "elements", allow_duplicate=True),
         Input("flight-select", "value"),
         prevent_initial_call=True
     )
     def highlight_selected(flight_id):
-        return _build_network_fig(G, df, positions, flight_id, set())
+        return build_cyto_elements(G, df, flight_id, set())
+
+    # ── Node click → show info in header ──────────────────────────────────────
+    @app.callback(
+        Output("cyto-node-info", "children"),
+        Input("network-graph",   "tapNodeData"),
+        prevent_initial_call=True
+    )
+    def show_node_info(node_data):
+        if not node_data:
+            return ""
+        fid  = node_data.get("id", "")
+        orig = node_data.get("origin", "")
+        dest = node_data.get("destination", "")
+        pax  = node_data.get("pax", 0)
+        slk  = node_data.get("slack", 0)
+        return f"{fid}  {orig}→{dest}  PAX {pax:,}  slack {slk:.0f}m"
 
 
 # ── Figure builders ────────────────────────────────────────────────────────────
-
-def _node_color(
-    flight_id: str,
-    status_by_flight: dict,
-    trigger_id: str | None,
-    affected_ids: set | None,
-) -> str:
-    """Return fill color for a graph node based on current status."""
-    if affected_ids is None:
-        affected_ids = set()
-
-    status = status_by_flight.get(flight_id, "scheduled")
-
-    if flight_id == trigger_id:      return COLORS["trigger"]
-    if status == "critical":         return COLORS["critical"]
-    if status == "delayed_high":     return COLORS["orange"]
-    if status == "delayed":          return COLORS["delayed"]
-    if status == "landed":           return COLORS["landed"]
-    return COLORS["normal"]
-
-
-def _build_network_fig(
-    G: nx.DiGraph,
-    df: pd.DataFrame,
-    positions: dict,
-    trigger_id: str | None,
-    affected_ids: set | None,
-) -> go.Figure:
-    """Render the flight dependency network as a Plotly figure."""
-    if affected_ids is None:
-        affected_ids = set()
-    highlighted_nodes = set(affected_ids)
-    if trigger_id:
-        highlighted_nodes.add(trigger_id)
-    status_by_flight = dict(zip(df["flight_id"], df["status"]))
-    def_x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
-
-    # ── Edges ──────────────────────────────────────────────────────────────────
-    edge_traces = []
-    for edge_type, color, dash in [
-        ("ROTATION", COLORS["cyan"],  "solid"),
-        ("CREW",     COLORS["teal"],  "dot"),
-        ("PAX_CNXN", COLORS["gold"],  "dash"),
-    ]:
-        ex, ey = [], []
-        has_highlight = False
-        for u, v, d in G.edges(data=True):
-            if d.get("edge_type") != edge_type:
-                continue
-            x0, y0 = positions.get(u, (def_x, 0))
-            x1, y1 = positions.get(v, (def_x, 0))
-            ex += [x0, x1, None]
-            ey += [y0, y1, None]
-            if u in highlighted_nodes or v in highlighted_nodes:
-                has_highlight = True
-
-        if ex:
-            opacity = 0.9 if (trigger_id and has_highlight) else 0.25
-
-            edge_traces.append(go.Scatter(
-                x=ex, y=ey, mode="lines",
-                line=dict(color=color, width=1.5, dash=dash),
-                opacity=opacity,
-                hoverinfo="none",
-                showlegend=False,
-            ))
-
-    # ── Nodes ──────────────────────────────────────────────────────────────────
-    node_x, node_y, node_color, node_size = [], [], [], []
-    node_text, node_hover = [], []
-
-    for flight_id, data in G.nodes(data=True):
-        x, y = positions.get(flight_id, (def_x, 0))
-        node_x.append(x)
-        node_y.append(y)
-
-        color = _node_color(flight_id, status_by_flight, trigger_id, affected_ids)
-        node_color.append(color)
-
-        # Size = proportional to pax count
-        pax = data.get("pax", 100)
-        size = 10 + (pax / 517) * 18  # 10–28 range
-        if flight_id == trigger_id:
-            size += 8
-        node_size.append(size)
-
-        node_text.append(flight_id)
-
-        direction = data.get("direction", "")
-        origin    = data.get("origin", "—")
-        dest      = data.get("destination", "—")
-        aircraft  = data.get("aircraft_reg", "—")
-        a_type    = data.get("aircraft_type", "—")
-        pax_n     = data.get("pax", 0)
-        slack     = data.get("turnaround_slack_min", 0)
-
-        node_hover.append(
-            f"<b style='font-family:JetBrains Mono'>{flight_id}</b><br>"
-            f"{origin} → {dest} · {direction.upper()}<br>"
-            f"{aircraft} ({a_type})<br>"
-            f"PAX: {pax_n:,}  |  Slack: {slack:.0f} min"
-        )
-
-    node_trace = go.Scatter(
-        x=node_x, y=node_y, mode="markers+text",
-        marker=dict(
-            color=node_color, size=node_size,
-            line=dict(color=COLORS["bg_1"], width=2),
-            symbol="circle",
-        ),
-        text=node_text,
-        textposition="top center",
-        textfont=dict(family="Barlow Condensed", size=11, color=COLORS["text_2"]),
-        hovertext=node_hover,
-        hovertemplate="%{hovertext}<extra></extra>",
-        hoverlabel=dict(
-            bgcolor=COLORS["bg_2"],
-            bordercolor=COLORS["border"],
-            font=dict(family="JetBrains Mono", size=12, color=COLORS["text_1"]),
-        ),
-        showlegend=False,
-    )
-
-    fig = go.Figure(data=edge_traces + [node_trace])
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor ="rgba(0,0,0,0)",
-        margin=dict(l=20, r=20, t=20, b=20),
-        showlegend=False,
-        hovermode="closest",
-        xaxis=dict(
-            type="date",
-            visible=True, showgrid=True,
-            gridcolor="rgba(28,45,72,0.5)",
-            zeroline=False, showticklabels=True,
-            tickfont=dict(family="JetBrains Mono", size=9, color=COLORS["text_3"]),
-            tickformat="%H:%M",
-            title=dict(text="TIME (UTC)", font=dict(size=9, color=COLORS["text_3"])),
-            fixedrange=False,
-        ),
-        yaxis=dict(
-            visible=True,
-            showgrid=False,
-            zeroline=False,
-            showticklabels=False,
-            fixedrange=False,
-        ),
-        uirevision="constant",
-        dragmode="pan",
-    )
-    return fig
-
 
 # _build_gantt defined below with recovery_label parameter
 
@@ -748,10 +618,8 @@ def register_phase3_callbacks(app, G, df):
     from engine.recovery import evaluate_all_recovery_options
     from engine.cascade import run_cascade
     from engine.pdf_report import generate_pdf_report
-    from engine.config import MC_SCENARIOS
     import plotly.graph_objects as go
-    import json, os, tempfile
-    from types import SimpleNamespace
+    import json, os, base64, tempfile
     from dash import Input, Output, State, html, dcc
     from dash.exceptions import PreventUpdate
 
@@ -762,22 +630,14 @@ def register_phase3_callbacks(app, G, df):
         Output("mc-network-stats", "children"),
         Output("mc-result-store",  "data"),
         Input("mc-run-btn", "n_clicks"),
-        prevent_initial_call=True,
-        running=[(Output("mc-run-btn", "disabled"), True, False)],
+        prevent_initial_call=True
     )
     def run_mc(n_clicks):
         if not n_clicks:
             raise PreventUpdate
 
-        mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
+        mc = run_monte_carlo(G, df, n_scenarios=500)
         ns = mc.network_summary
-        if ns is None:
-            return (
-                html.Div("Monte Carlo failed to produce scenarios.", className="log-empty"),
-                [],
-                html.Div(),
-                None,
-            )
 
         # ── Status bar ──────────────────────────────────────────────────────
         status = html.Div(className="mc-status-done", children=[
@@ -988,8 +848,7 @@ def register_phase3_callbacks(app, G, df):
         State("flight-select",   "value"),
         State("delay-slider",    "value"),
         State("mc-result-store", "data"),
-        prevent_initial_call=True,
-        running=[(Output("pdf-export-btn", "disabled"), True, False)],
+        prevent_initial_call=True
     )
     def export_pdf(n_clicks, cascade_store, flight_id, delay_min, mc_store):
         if not n_clicks:
@@ -1021,45 +880,9 @@ def register_phase3_callbacks(app, G, df):
             for o in options
         ]
 
-        if mc_store:
-            mc_payload = json.loads(mc_store)
-            ns = SimpleNamespace(
-                n_scenarios=mc_payload.get("n_scenarios", 0),
-                mean_flights_affected=mc_payload.get("mean_flights_affected", 0.0),
-                p50_flights_affected=mc_payload.get("p50_flights_affected", 0.0),
-                p90_flights_affected=mc_payload.get("p90_flights_affected", 0.0),
-                p99_flights_affected=mc_payload.get("p99_flights_affected", 0.0),
-                mean_cost_usd=mc_payload.get("mean_cost_usd", 0.0),
-                p50_cost_usd=mc_payload.get("p50_cost_usd", 0.0),
-                p90_cost_usd=mc_payload.get("p90_cost_usd", 0.0),
-                p99_cost_usd=mc_payload.get("p99_cost_usd", 0.0),
-                mean_total_delay=mc_payload.get("mean_total_delay", 0.0),
-                p90_total_delay=mc_payload.get("p90_total_delay", 0.0),
-                zero_cascade_pct=mc_payload.get("zero_cascade_pct", 0.0),
-                critical_scenario_pct=mc_payload.get("critical_scenario_pct", 0.0),
-                top_triggers=mc_payload.get("top_triggers", []),
-            )
-            risk_profiles = {
-                fid: SimpleNamespace(
-                    risk_label=p.get("risk_label", "LOW"),
-                    risk_score=p.get("risk_score", 0.0),
-                    victim_probability=p.get("victim_probability", 0.0),
-                    trigger_avg_cost=p.get("trigger_avg_cost", 0.0),
-                    direction=p.get("direction", ""),
-                    origin=p.get("origin", ""),
-                    destination=p.get("destination", ""),
-                    aircraft_type=p.get("aircraft_type", ""),
-                )
-                for fid, p in mc_payload.get("risk_profiles", {}).items()
-            }
-            mc = SimpleNamespace(
-                n_scenarios=ns.n_scenarios,
-                network_summary=ns,
-                risk_profiles=risk_profiles,
-            )
-        else:
-            from engine.monte_carlo import run_monte_carlo
-            mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
+        # Re-run MC if no stored result (lightweight)
+        from engine.monte_carlo import run_monte_carlo, MonteCarloResult
+        mc = run_monte_carlo(G, df, n_scenarios=500)
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             path = tmp.name

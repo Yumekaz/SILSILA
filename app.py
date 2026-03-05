@@ -1,21 +1,21 @@
 """
 app.py
 ------
-SILSILA — Phase 1
+SILSILA — Phase 3 + Cytoscape network graph
 Run:  python app.py
 Open: http://localhost:8050
 """
 
 import logging
-import os
 import warnings
 from datetime import datetime, timezone
 
 import dash
+import dash_cytoscape as cyto
 import pandas as pd
 
 from engine.data_loader   import load_schedule
-from engine.graph_builder import build_graph, graph_summary, compute_node_positions
+from engine.graph_builder import build_graph, graph_summary
 from ui.layout            import build_layout
 from ui.callbacks         import register_callbacks, register_phase3_callbacks
 
@@ -26,6 +26,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("app")
+
+# Load Cytoscape extra layouts (cola, dagre, etc.) — optional but nice
+cyto.load_extra_layouts()
 
 
 def main():
@@ -44,9 +47,6 @@ def main():
         summary["nodes"], summary["edges"],
         " | ".join(f"{k}:{v}" for k, v in summary["edge_types"].items())
     )
-
-    logger.info("Computing node positions for layout caching …")
-    positions = compute_node_positions(G)
 
     # ── Build flight selector options ──────────────────────────────────────────
     flight_options = []
@@ -73,17 +73,16 @@ def main():
     )
     app.layout = build_layout(flight_options)
 
-    # Register all callbacks (pass G, df, and cached positions into closure)
-    register_callbacks(app, G, df, positions)
+    # Register callbacks — no positions arg needed now (Cytoscape handles layout)
+    register_callbacks(app, G, df)
     register_phase3_callbacks(app, G, df)
 
     logger.info("─" * 60)
-    logger.info("  SILSILA  ·  Phase 3  — CASCADE + RECOVERY + MONTE CARLO")
+    logger.info("  SILSILA  ·  Phase 3 + Cytoscape")
     logger.info("  http://localhost:8050")
     logger.info("─" * 60)
 
-    debug_mode = os.getenv("DASH_DEBUG", "0") == "1"
-    app.run(debug=debug_mode, host="0.0.0.0", port=8050)
+    app.run(debug=True, host="0.0.0.0", port=8050)
 
 
 if __name__ == "__main__":
