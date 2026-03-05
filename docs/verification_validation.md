@@ -13,6 +13,7 @@ Current automated checks cover:
 - PDF generation smoke path
 - state serialization round trips
 - turnaround sensitivity-analysis output
+- Pareto-front recovery annotation output
 
 Run:
 

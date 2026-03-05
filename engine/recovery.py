@@ -84,6 +84,8 @@ class RecoveryOption:
 
     # Which flights are still delayed (residual cascade)
     residual_events:    list = field(default_factory=list)
+    pareto_efficient:   bool = False
+    recommendation:     str = ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -644,4 +646,25 @@ def evaluate_all_recovery_options(
         heuristic_delay(G, df, result),
         heuristic_cancel(G, df, result),
     ]
-    return sorted(options, key=lambda o: o.score, reverse=True)
+    feasible = [option for option in options if option.feasible]
+    for option in feasible:
+        dominated = False
+        for other in feasible:
+            if other is option:
+                continue
+            better_or_equal_delay = other.delay_reduction_min >= option.delay_reduction_min
+            better_or_equal_cost = other.net_cost_usd <= option.net_cost_usd
+            strictly_better = (
+                other.delay_reduction_min > option.delay_reduction_min or
+                other.net_cost_usd < option.net_cost_usd
+            )
+            if better_or_equal_delay and better_or_equal_cost and strictly_better:
+                dominated = True
+                break
+        option.pareto_efficient = not dominated
+        option.recommendation = "PARETO" if option.pareto_efficient else ""
+
+    ranked = sorted(options, key=lambda option: option.score, reverse=True)
+    if ranked:
+        ranked[0].recommendation = "TOP SCORE" if not ranked[0].pareto_efficient else "PARETO · TOP SCORE"
+    return ranked

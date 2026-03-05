@@ -19,6 +19,7 @@ from engine.config import MC_SCENARIOS
 from engine.monte_carlo import build_heatmap_data, run_monte_carlo
 from engine.pdf_report import generate_pdf_report
 from engine.recovery import evaluate_all_recovery_options
+from engine.sensitivity import run_turnaround_sensitivity
 from ui.callbacks_core import COLORS
 from ui.session_state import (
     deserialize_cascade_store,
@@ -226,6 +227,110 @@ def register_phase3_callbacks(app, G, df):
         })
 
         return status, charts, stats, mc_store
+
+    @app.callback(
+        Output("sensitivity-status-bar", "children"),
+        Output("sensitivity-chart", "figure"),
+        Output("sensitivity-summary", "children"),
+        Input("sensitivity-run-btn", "n_clicks"),
+        State("flight-select", "value"),
+        State("delay-slider", "value"),
+        prevent_initial_call=True,
+    )
+    def run_sensitivity(n_clicks, flight_id, delay_min):
+        if not n_clicks or not flight_id or not delay_min:
+            raise PreventUpdate
+
+        points = run_turnaround_sensitivity(
+            df,
+            trigger_ids=[flight_id],
+            trigger_delay_min=float(delay_min),
+            min_turnaround_values=[35.0, 45.0, 55.0, 65.0],
+        )
+
+        figure = go.Figure()
+        x_vals = [point.min_turnaround_min for point in points]
+        figure.add_trace(go.Scatter(
+            x=x_vals,
+            y=[point.mean_flights_affected for point in points],
+            mode="lines+markers",
+            name="Flights affected",
+            line=dict(color=COLORS["cyan"], width=2),
+        ))
+        figure.add_trace(go.Scatter(
+            x=x_vals,
+            y=[point.mean_total_delay_min for point in points],
+            mode="lines+markers",
+            name="Total delay (min)",
+            yaxis="y2",
+            line=dict(color=COLORS["gold"], width=2),
+        ))
+        figure.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=50, r=50, t=25, b=40),
+            title=dict(
+                text=f"TURNAROUND SENSITIVITY · {flight_id} @ +{int(delay_min)}m",
+                font=dict(family="Barlow Condensed", size=11, color=COLORS["text_3"]),
+                x=0,
+            ),
+            font=dict(family="JetBrains Mono", color=COLORS["text_2"], size=9),
+            xaxis=dict(
+                title=dict(text="Minimum Turnaround (min)", font=dict(size=9)),
+                tickmode="array",
+                tickvals=x_vals,
+                showgrid=True,
+                gridcolor="rgba(28,45,72,0.5)",
+                zeroline=False,
+            ),
+            yaxis=dict(
+                title=dict(text="Flights Affected", font=dict(size=9)),
+                showgrid=True,
+                gridcolor="rgba(28,45,72,0.5)",
+                zeroline=False,
+            ),
+            yaxis2=dict(
+                title=dict(text="Total Delay (min)", font=dict(size=9)),
+                overlaying="y",
+                side="right",
+                showgrid=False,
+                zeroline=False,
+            ),
+            legend=dict(orientation="h", x=0, y=1.15),
+        )
+
+        baseline = next(point for point in points if point.min_turnaround_min == 45.0)
+        tightest = min(points, key=lambda point: point.min_turnaround_min)
+        strictest = max(points, key=lambda point: point.min_turnaround_min)
+        status = html.Div(className="mc-status-done", children=[
+            html.Span(
+                f"✓  Compared {len(points)} turnaround assumptions for {flight_id}",
+                style={"color": COLORS["teal"], "fontFamily": "JetBrains Mono", "fontSize": "11px"},
+            ),
+            html.Span(
+                f"  |  baseline 45m → {baseline.mean_flights_affected:.1f} flights hit",
+                style={"color": COLORS["text_3"], "fontFamily": "JetBrains Mono", "fontSize": "11px"},
+            ),
+        ])
+        summary = html.Div(className="mc-stats-row", children=[
+            html.Div(className="metric-box cyan", children=[
+                html.Div("35 MIN TURN", className="metric-key"),
+                html.Div(f"{tightest.mean_flights_affected:.1f} flights", className="metric-val"),
+            ]),
+            html.Div(className="metric-box gold", children=[
+                html.Div("45 MIN BASELINE", className="metric-key"),
+                html.Div(f"{baseline.mean_total_delay_min:.0f}m", className="metric-val"),
+            ]),
+            html.Div(className="metric-box red", children=[
+                html.Div("65 MIN TURN", className="metric-key"),
+                html.Div(f"{strictest.mean_flights_affected:.1f} flights", className="metric-val"),
+            ]),
+            html.Div(className="metric-box teal", children=[
+                html.Div("DELTA VS 45", className="metric-key"),
+                html.Div(f"{strictest.mean_total_delay_min - baseline.mean_total_delay_min:+.0f}m", className="metric-val"),
+            ]),
+        ])
+        return status, figure, summary
 
     @app.callback(
         Output("pdf-download", "data"),

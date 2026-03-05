@@ -48,9 +48,10 @@ Recently improved:
 - stronger graph and schedule behavior tests
 - callback code split by feature area
 - inbound-only trigger selection
-- backend turnaround sensitivity analysis
+- dashboard turnaround sensitivity analysis
 - formal repo-side SE documentation package
 - Render deployment scaffolding
+- Pareto-front recovery tradeoff annotation
 
 ## Architecture
 
@@ -177,11 +178,10 @@ Additional systems-engineering documents now live in [`docs/`](/c:/Users/Mihir/O
 
 These project-bible items are still only partial after this pass:
 
-- sensitivity analysis exists as a backend module, not yet as a dashboard feature
 - historical validation is documented as a framework, not completed with public case data
 - deployment config is included, but no live deployed URL is part of the repo
 - demo-assets structure exists, but curated screenshots/video are not yet added
-- recovery remains heuristic scoring, not a true optimization engine
+- recovery now includes Pareto-front tradeoff analysis, but it is still not a true optimization solver
 
 ## Key Files
 

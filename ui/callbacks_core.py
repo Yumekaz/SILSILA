@@ -380,6 +380,15 @@ def _build_recovery_cards(options: list) -> list:
                     html.Span(label, className="rc-score-badge",
                               style={"color": label_color, "borderColor": label_color}),
                 ]),
+                html.Div(
+                    option.recommendation or ("PARETO-EFFICIENT" if option.pareto_efficient else "DOMINATED TRADEOFF"),
+                    className="rc-desc",
+                    style={
+                        "color": COLORS["teal"] if option.pareto_efficient else COLORS["text_3"],
+                        "marginTop": "6px",
+                        "fontSize": "11px",
+                    },
+                ),
                 html.Div(className="rc-score-bar-bg", children=[
                     html.Div(className="rc-score-bar-fill",
                              style={"width": f"{max(4, int(option.score))}%", "background": strategy["accent"]}),

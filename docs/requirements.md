@@ -35,4 +35,4 @@
 ## Status
 
 - `FR-1` to `FR-8`: implemented
-- `FR-9`: partially implemented in code as a backend analysis module, not yet exposed in the UI
+- `FR-9`: implemented

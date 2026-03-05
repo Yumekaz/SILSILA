@@ -4,6 +4,7 @@
 
 - The project is runnable locally.
 - A basic Render deployment config is included in the repo.
+- A standard `Procfile` is included for platforms that use process-based startup.
 - No confirmed live deployment URL is stored in the repository.
 
 ## Render

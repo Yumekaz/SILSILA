@@ -309,6 +309,42 @@ def build_monte_carlo_panel() -> html.Div:
     ])
 
 
+def build_sensitivity_panel() -> html.Div:
+    """Turnaround sensitivity analysis panel."""
+    return html.Div(className="mc-panel", id="sensitivity-panel", children=[
+        html.Div(className="panel-header", children=[
+            html.Span("TURNAROUND SENSITIVITY ANALYSIS", className="panel-title"),
+            html.Div([
+                html.Span("SENSITIVITY", className="panel-badge", style={"marginRight": "6px"}),
+                html.Button(
+                    "▶  RUN SENSITIVITY",
+                    id="sensitivity-run-btn",
+                    className="mc-run-btn",
+                    n_clicks=0,
+                ),
+            ]),
+        ]),
+        html.Div(id="sensitivity-status-bar", className="mc-status-bar", children=[
+            html.Div(className="log-empty", style={"height": "60px"}, children=[
+                html.Div("◈", className="icon"),
+                html.Div("SENSITIVITY READY — compare 35/45/55/65 minute turnaround assumptions",
+                         style={"textTransform": "none", "letterSpacing": "0"}),
+            ]),
+        ]),
+        html.Div(className="mc-charts-grid", children=[
+            html.Div(className="mc-chart-cell mc-chart-wide", children=[
+                dcc.Graph(
+                    id="sensitivity-chart",
+                    figure=empty_gantt_fig(),
+                    config={"displayModeBar": False},
+                    style={"height": "240px"},
+                ),
+            ]),
+        ]),
+        html.Div(id="sensitivity-summary", className="mc-network-stats"),
+    ])
+
+
 # ─── Root Layout ──────────────────────────────────────────────────────────────
 
 def build_layout(flight_options: list) -> html.Div:
@@ -322,6 +358,7 @@ def build_layout(flight_options: list) -> html.Div:
         build_recovery_panel(),
         build_gantt_panel(),
         build_monte_carlo_panel(),
+        build_sensitivity_panel(),
 
         # Hidden stores
         dcc.Store(id="cascade-result-store"),

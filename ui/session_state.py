@@ -62,6 +62,8 @@ def serialize_recovery_options(options) -> str:
             "net_cost_usd": option.net_cost_usd,
             "pax_saved": option.pax_saved,
             "score": option.score,
+            "pareto_efficient": option.pareto_efficient,
+            "recommendation": option.recommendation,
         }
         for option in options
     ]

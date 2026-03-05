@@ -120,6 +120,7 @@ def test_recovery_options_are_ranked_and_complete(schedule_df, dependency_graph)
     assert all(options[i].score >= options[i + 1].score for i in range(len(options) - 1))
     assert {o.strategy for o in options} == {"SWAP", "DELAY", "CANCEL"}
     assert all(0 <= o.score <= 100 for o in options)
+    assert any(o.pareto_efficient for o in options if o.feasible)
 
 
 def test_recovery_preserves_crew_residuals(schedule_df, dependency_graph):
@@ -276,6 +277,7 @@ def test_recovery_options_serialize_for_export(schedule_df, dependency_graph):
     assert len(restored) == 3
     assert {item["strategy"] for item in restored} == {"SWAP", "DELAY", "CANCEL"}
     assert all("label" in item and "score" in item for item in restored)
+    assert all("pareto_efficient" in item for item in restored)
 
 
 def test_turnaround_sensitivity_returns_ordered_scenarios(schedule_df):
