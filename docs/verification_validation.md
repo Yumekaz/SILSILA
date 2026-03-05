@@ -5,10 +5,12 @@
 Current automated checks cover:
 
 - schedule schema validity
+- schedule and graph validation reports
 - graph edge construction sanity
 - rotation slack correctness
 - cascade propagation updates for inbound and outbound triggers
 - recovery regression scenarios
+- optimizer selection behavior
 - Monte Carlo output structure
 - PDF generation smoke path
 - state serialization round trips

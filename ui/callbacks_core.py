@@ -14,6 +14,7 @@ import plotly.graph_objects as go
 import pandas as pd
 
 from engine.cascade import run_cascade, cascaded_schedule
+from engine.optimizer import optimize_recovery_options
 from engine.recovery import evaluate_all_recovery_options
 from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
 from ui.session_state import serialize_cascade_result, serialize_recovery_options
@@ -142,6 +143,7 @@ def register_callbacks(app, G, df):
         Output("summary-metrics", "children"),
         Output("recovery-cards", "children"),
         Output("recovery-status-badge", "children"),
+        Output("optimizer-summary", "children"),
         Output("recovery-options-store", "data"),
         Input("trigger-btn", "n_clicks"),
         Input("reset-btn", "n_clicks"),
@@ -166,6 +168,7 @@ def register_callbacks(app, G, df):
                 html.Div(),
                 empty_recovery,
                 "AWAITING CASCADE",
+                html.Div(),
                 None,
             )
 
@@ -180,6 +183,7 @@ def register_callbacks(app, G, df):
                 html.Div(),
                 empty_recovery,
                 "AWAITING CASCADE",
+                html.Div(),
                 None,
             )
 
@@ -187,6 +191,7 @@ def register_callbacks(app, G, df):
         df_cascaded = cascaded_schedule(df, G, result)
         affected_ids = {event.flight_id for event in result.events}
         recovery_options = evaluate_all_recovery_options(G, df, result)
+        optimization = optimize_recovery_options(recovery_options)
 
         return (
             serialize_cascade_result(result, G),
@@ -198,6 +203,7 @@ def register_callbacks(app, G, df):
             _build_summary_metrics(result),
             _build_recovery_cards(recovery_options),
             f"{len([option for option in recovery_options if option.feasible])} OPTIONS READY",
+            _build_optimizer_summary(optimization),
             serialize_recovery_options(recovery_options),
         )
 
@@ -314,6 +320,27 @@ def _build_summary_metrics(result) -> html.Div:
                 html.Div(f"${summary['estimated_cost_usd']:,.0f}", className="metric-val",
                          style={"fontSize": "16px"}),
             ]),
+        ]),
+    ])
+
+
+def _build_optimizer_summary(optimization) -> html.Div:
+    if not optimization.candidates:
+        return html.Div()
+    frontier = ", ".join(optimization.frontier_labels) if optimization.frontier_labels else "—"
+    best = optimization.candidates[0]
+    return html.Div(className="mc-stats-row", children=[
+        html.Div(className="metric-box teal", children=[
+            html.Div("OPTIMIZER PICK", className="metric-key"),
+            html.Div(optimization.best_label or "—", className="metric-val"),
+        ]),
+        html.Div(className="metric-box cyan", children=[
+            html.Div("OBJECTIVE SCORE", className="metric-key"),
+            html.Div(f"{best.objective_score:.3f}", className="metric-val"),
+        ]),
+        html.Div(className="metric-box gold", children=[
+            html.Div("PARETO FRONT", className="metric-key"),
+            html.Div(frontier, className="metric-val", style={"fontSize": "12px"}),
         ]),
     ])
 

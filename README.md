@@ -1,110 +1,211 @@
 # SILSILA
 
-SILSILA is an interactive disruption-cascade simulator for Hamad International Airport (DOH/OTHH).
-It models how a delayed flight can propagate through aircraft rotations, crew dependencies, and passenger connections, then compares simple recovery options and Monte Carlo risk outcomes in a Dash dashboard.
+SILSILA is a systems-engineering simulation of flight-disruption propagation at Hamad International Airport (DOH/OTHH). It models how an inbound delay can spread through aircraft rotations, simplified crew dependencies, and passenger connections, then compares recovery actions, runs Monte Carlo risk scenarios, and exports a report.
 
-This is a genuine simulation project with real code, tests, and a coherent model pipeline. It is not a production airline optimizer and it does not claim airline-certified operational fidelity.
+The project is designed as a transparent decision-support prototype. It is not an airline-certified operational optimizer, but it is no longer just a dashboard demo: it contains a graph model, propagation engine, discrete recovery optimizer, sensitivity analysis, regression tests, and a structured documentation package.
 
-## What The Project Actually Does
+## Scope
 
-- Loads a daily schedule, using a synthetic Doha hub schedule by default and an OpenSky-based path when enabled.
-- Builds a directed dependency graph across flights.
-- Simulates delay propagation with edge-specific rules for:
-  - aircraft rotation
-  - crew transfer
-  - passenger connection misses
-- Evaluates three recovery heuristics:
-  - aircraft swap
-  - compress and absorb
-  - cancel and rebook
-- Runs Monte Carlo scenarios to estimate network-wide disruption risk.
-- Exports a PDF summary of the current scenario.
+The system currently supports:
 
-## What It Does Not Claim
+- daily Doha schedule loading
+- graph construction across flights and dependencies
+- cascade simulation from an inbound trigger
+- recovery evaluation for swap, compress/absorb, and cancel actions
+- discrete optimization across feasible recovery candidates
+- Pareto-front tradeoff analysis
+- Monte Carlo network-risk analysis
+- turnaround sensitivity analysis
+- PDF report export
 
-- It does not use proprietary Qatar Airways operational systems or internal OTP data.
-- It does not solve a formal optimization problem.
-- It does not model every airline constraint such as maintenance routing, slot controls, full crew legality, curfews, gate conflicts, or revenue management.
-- It should be treated as a systems-engineering simulation and decision-support prototype, not a dispatch-certified ops tool.
+## Technical Positioning
 
-## Current Status
+This repository should be described as:
 
-Implemented:
+`A systems-engineering disruption simulator for a hub-and-spoke airline network, with recovery tradeoff analysis, risk simulation, and report generation.`
 
-- interactive Dash UI
-- dependency graph construction
-- cascade simulation engine
-- recovery heuristics
-- Monte Carlo analysis
-- PDF export
-- regression tests for core behaviors
+That is an accurate claim.
 
-Recently improved:
+## What Makes It More Than A Demo
 
-- outbound-trigger recovery correctness
-- preservation of crew residual effects in recovery strategies
-- more state-driven export behavior
-- callback state serialization
-- stronger graph and schedule behavior tests
-- callback code split by feature area
-- inbound-only trigger selection
-- dashboard turnaround sensitivity analysis
-- formal repo-side SE documentation package
-- Render deployment scaffolding
-- Pareto-front recovery tradeoff annotation
+- Core state lives in explicit schedule, graph, cascade, and recovery models.
+- Recovery is no longer ranked only by hand-tuned heuristic score. A discrete optimization layer now minimizes a weighted objective across feasible actions.
+- Recovery options also expose Pareto-efficient tradeoffs rather than pretending there is always one obvious best answer.
+- Sensitivity analysis is implemented as an actual analysis path, not only as documentation.
+- Validation and deployment artifacts exist in the repository.
 
-## Architecture
+## Key Features
 
-```text
-doha_cascade/
-├── app.py
-├── engine/
-│   ├── data_loader.py
-│   ├── graph_builder.py
-│   ├── cascade.py
-│   ├── recovery.py
-│   ├── monte_carlo.py
-│   ├── pdf_report.py
-│   └── cyto_graph.py
-├── ui/
-│   ├── layout.py
-│   ├── callbacks.py
-│   ├── callbacks_core.py
-│   ├── callbacks_phase3.py
-│   └── session_state.py
-├── assets/
-│   └── style.css
-└── tests/
-    └── test_smoke.py
+### 1. Dependency Graph
+
+Flights are modeled as nodes. Edges represent:
+
+- aircraft rotation dependencies
+- crew handover dependencies
+- passenger connection dependencies
+
+Relevant files:
+
+- [`engine/graph_builder.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/graph_builder.py)
+- [`engine/data_loader.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/data_loader.py)
+
+### 2. Cascade Simulation
+
+Given an inbound trigger flight and a delay magnitude, the engine propagates disruption through the dependency graph and computes:
+
+- affected flights
+- propagated delay
+- stranded passengers
+- estimated cost
+- propagation depth and path
+
+Relevant file:
+
+- [`engine/cascade.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/cascade.py)
+
+### 3. Recovery Layer
+
+The recovery layer evaluates:
+
+- `SWAP`
+- `DELAY`
+- `CANCEL`
+
+Each candidate carries:
+
+- residual delay
+- net cost
+- passenger impact
+- action log
+- Pareto efficiency tag
+
+Relevant file:
+
+- [`engine/recovery.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/recovery.py)
+
+### 4. Optimization Layer
+
+The repository now includes a discrete optimization step over feasible recovery candidates. The optimizer minimizes a weighted objective across:
+
+- residual net cost
+- residual delay
+- stranded passengers
+
+This is not a full airline OR solver, but it is a real optimization layer over candidate actions rather than pure score ordering.
+
+Relevant file:
+
+- [`engine/optimizer.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/optimizer.py)
+
+### 5. Monte Carlo Risk Analysis
+
+The app can run multi-scenario disruption analysis and produce:
+
+- cascade cost distribution
+- sampled delay distribution
+- risk heatmap
+- network summary metrics
+
+Relevant file:
+
+- [`engine/monte_carlo.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/monte_carlo.py)
+
+### 6. Sensitivity Analysis
+
+The app includes turnaround sensitivity analysis, showing how cascade severity changes as the assumed minimum turnaround requirement is tightened or relaxed.
+
+Relevant file:
+
+- [`engine/sensitivity.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/sensitivity.py)
+
+### 7. Reporting
+
+The system exports a PDF report covering:
+
+- cascade summary
+- recovery comparison
+- Monte Carlo summary
+- flight risk profiles
+- integration note
+
+Relevant file:
+
+- [`engine/pdf_report.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/pdf_report.py)
+
+## User Interface
+
+The dashboard includes:
+
+- inbound trigger selector
+- delay input controls
+- interactive network graph
+- cascade event log
+- Gantt schedule view
+- recovery cards
+- optimizer summary
+- Monte Carlo panel
+- sensitivity-analysis panel
+- PDF export action
+
+Relevant files:
+
+- [`ui/layout.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/layout.py)
+- [`ui/callbacks_core.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/callbacks_core.py)
+- [`ui/callbacks_phase3.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/callbacks_phase3.py)
+- [`ui/session_state.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/session_state.py)
+
+## Data Path
+
+The data path is intentionally explicit:
+
+- OpenSky support exists for public arrival data
+- the application still falls back to a synthetic but internally consistent hub schedule when the public data path is incomplete
+- schedule provenance is now carried in `DataFrame.attrs["data_source"]` and surfaced in the UI header
+
+This is a pragmatic compromise: the app remains runnable while documenting when it is using a partial public-data path versus a modeled schedule.
+
+## Validation
+
+The repository includes both automated tests and internal validation helpers.
+
+Automated checks currently cover:
+
+- schedule schema and provenance
+- schedule validation reports
+- graph validation reports
+- rotation-edge slack correctness
+- cascade propagation behavior
+- recovery regressions
+- optimizer behavior
+- Monte Carlo output shape
+- sensitivity-analysis behavior
+- PDF generation
+- state serialization
+
+Run:
+
+```bash
+pytest -q
 ```
 
-## Model Assumptions
+Relevant files:
 
-The project is only as credible as its assumptions. The main ones are explicit:
+- [`engine/validation.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/validation.py)
+- [`tests/test_smoke.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/tests/test_smoke.py)
 
-- Schedule data:
-  synthetic schedule is the default reliable path
-  OpenSky support is best treated as optional and partial
-- Rotations:
-  one inbound and one outbound pairing per aircraft in the synthetic schedule
-- Crew:
-  crew dependencies are simplified into shared crew IDs and transfer windows
-- Passenger connections:
-  connection demand is estimated heuristically rather than sourced from PNR data
-- Recovery:
-  swap, compress, and cancel are heuristics, not an optimization solver
-- Monte Carlo:
-  initial delays are sampled from a configured lognormal distribution calibrated as an approximation, not a validated Doha-specific empirical fit
+## Documentation Package
 
-These assumptions are acceptable for a portfolio-grade simulation if they are stated plainly.
+The repository includes a dedicated engineering documentation set under [`docs/`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs):
 
-## Why The Project Is Defensible
-
-- The codebase has real module boundaries instead of one-file demo logic.
-- Core behaviors are test-covered.
-- The UI is backed by an actual dependency graph and propagation engine.
-- Recovery output and exports now rely more directly on stored state instead of loosely recomputing everything.
-- Limitations are explicit rather than hidden.
+- [`requirements.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/requirements.md)
+- [`functional_decomposition.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/functional_decomposition.md)
+- [`data_dictionary.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/data_dictionary.md)
+- [`ui_spec.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/ui_spec.md)
+- [`fmea.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/fmea.md)
+- [`verification_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/verification_validation.md)
+- [`historical_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/historical_validation.md)
+- [`deployment.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/deployment.md)
+- [`demo_assets.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/demo_assets.md)
 
 ## Setup
 
@@ -128,75 +229,28 @@ python app.py
 
 Open `http://localhost:8050`.
 
-## How To Use
+## Deployment
 
-1. Select a trigger flight.
-2. Choose a delay magnitude.
-3. Run the cascade simulation.
-4. Inspect:
-   - network graph highlights
-   - cascade event log
-   - Gantt timeline
-   - recovery option cards
-5. Run Monte Carlo to inspect network risk.
-6. Export a PDF report for the current scenario.
+The repository includes:
 
-## Test Suite
+- [`render.yaml`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/render.yaml)
+- [`Procfile`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/Procfile)
+- [`runtime.txt`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/runtime.txt)
 
-Run:
+The current server entrypoint is:
 
 ```bash
-pytest -q
+gunicorn app:server
 ```
 
-The current test suite covers:
+## Limitations
 
-- schedule schema sanity
-- graph edge-type presence and rotation slack correctness
-- cascade schedule updates for inbound and outbound triggers
-- recovery ranking and recovery regressions
-- Monte Carlo output shape
-- PDF generation smoke path
-- session-state serialization helpers
-- turnaround sensitivity-analysis outputs
+The project still has important limits:
 
-## Documentation Package
+- public real-data coverage is incomplete for full hub reconstruction
+- historical downstream validation is not fully closed with trusted operational ground truth
+- recovery optimization is discrete over candidate actions, not a network-wide mixed-integer optimizer
+- the repository does not include a confirmed live public deployment URL
+- the demo-assets folder is scaffolded but not yet populated with curated screenshots/video
 
-Additional systems-engineering documents now live in [`docs/`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs):
-
-- [`requirements.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/requirements.md)
-- [`functional_decomposition.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/functional_decomposition.md)
-- [`data_dictionary.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/data_dictionary.md)
-- [`ui_spec.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/ui_spec.md)
-- [`fmea.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/fmea.md)
-- [`verification_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/verification_validation.md)
-- [`historical_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/historical_validation.md)
-- [`deployment.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/deployment.md)
-- [`demo_assets.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/demo_assets.md)
-
-## Still Partial
-
-These project-bible items are still only partial after this pass:
-
-- historical validation is documented as a framework, not completed with public case data
-- deployment config is included, but no live deployed URL is part of the repo
-- demo-assets structure exists, but curated screenshots/video are not yet added
-- recovery now includes Pareto-front tradeoff analysis, but it is still not a true optimization solver
-
-## Key Files
-
-- [`app.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/app.py): application entry point
-- [`engine/cascade.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/cascade.py): propagation logic
-- [`engine/recovery.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/recovery.py): recovery heuristics
-- [`engine/monte_carlo.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/monte_carlo.py): risk simulation
-- [`ui/callbacks_core.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/callbacks_core.py): live simulation and recovery callbacks
-- [`ui/callbacks_phase3.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/callbacks_phase3.py): Monte Carlo and export callbacks
-- [`ui/session_state.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/session_state.py): Dash store serialization helpers
-
-## If I Were Presenting This
-
-The strongest accurate description is:
-
-`A systems-engineering simulation of airline disruption propagation at a hub, with interactive recovery heuristics and Monte Carlo risk analysis.`
-
-That is strong, credible, and technically defensible.
+These are real limitations and should be stated plainly.

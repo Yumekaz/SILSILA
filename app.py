@@ -51,6 +51,7 @@ def build_flight_options(df: pd.DataFrame, inbound_only: bool = True) -> list[di
 def create_app(df: pd.DataFrame, G):
     """Initialise and wire the Dash application."""
     flight_options = build_flight_options(df, inbound_only=True)
+    source_label = str(df.attrs.get("data_source", "synthetic-hub-schedule")).replace("-", " ").upper()
 
     app = dash.Dash(
         __name__,
@@ -62,7 +63,7 @@ def create_app(df: pd.DataFrame, G):
              "content": "width=device-width, initial-scale=1"}
         ],
     )
-    app.layout = build_layout(flight_options)
+    app.layout = build_layout(flight_options, source_label)
 
     # Register callbacks — no positions arg needed now (Cytoscape handles layout)
     register_callbacks(app, G, df)

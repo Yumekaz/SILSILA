@@ -12,8 +12,10 @@ from engine.graph_builder import build_graph, graph_summary
 from engine.cascade import run_cascade, cascaded_schedule
 from engine.recovery import evaluate_all_recovery_options
 from engine.monte_carlo import run_monte_carlo, build_heatmap_data
+from engine.optimizer import optimize_recovery_options
 from engine.pdf_report import generate_pdf_report
 from engine.sensitivity import run_turnaround_sensitivity
+from engine.validation import validate_graph, validate_schedule
 from ui.session_state import (
     deserialize_cascade_store,
     deserialize_mc_store,
@@ -38,6 +40,7 @@ def test_schedule_has_required_schema(schedule_df):
     assert REQUIRED_COLUMNS.issubset(schedule_df.columns)
     assert (schedule_df["direction"] == "inbound").any()
     assert (schedule_df["direction"] == "outbound").any()
+    assert "data_source" in schedule_df.attrs
 
 
 def test_flight_options_are_inbound_only(schedule_df):
@@ -55,6 +58,16 @@ def test_graph_builds_and_has_core_edge_types(dependency_graph):
     assert summary["edges"] > 0
     for edge_type in ("ROTATION", "PAX_CNXN", "CREW"):
         assert summary["edge_types"].get(edge_type, 0) >= 1
+
+
+def test_schedule_and_graph_validation_reports_pass(schedule_df, dependency_graph):
+    schedule_report = validate_schedule(schedule_df)
+    graph_report = validate_graph(dependency_graph)
+
+    assert schedule_report.passed
+    assert not schedule_report.errors
+    assert graph_report.passed
+    assert not graph_report.errors
 
 
 def test_rotation_edges_match_aircraft_and_schedule_slack(schedule_df, dependency_graph):
@@ -121,6 +134,18 @@ def test_recovery_options_are_ranked_and_complete(schedule_df, dependency_graph)
     assert {o.strategy for o in options} == {"SWAP", "DELAY", "CANCEL"}
     assert all(0 <= o.score <= 100 for o in options)
     assert any(o.pareto_efficient for o in options if o.feasible)
+
+
+def test_optimizer_selects_feasible_best_candidate(schedule_df, dependency_graph):
+    trigger_id = schedule_df.iloc[0]["flight_id"]
+    result = run_cascade(dependency_graph, trigger_id, 30.0)
+    options = evaluate_all_recovery_options(dependency_graph, schedule_df, result)
+    optimization = optimize_recovery_options(options)
+
+    assert optimization.best_strategy is not None
+    assert optimization.candidates
+    assert optimization.candidates[0].objective_score <= optimization.candidates[-1].objective_score
+    assert all(option.objective_score >= 0 for option in options if option.feasible)
 
 
 def test_recovery_preserves_crew_residuals(schedule_df, dependency_graph):
@@ -278,6 +303,7 @@ def test_recovery_options_serialize_for_export(schedule_df, dependency_graph):
     assert {item["strategy"] for item in restored} == {"SWAP", "DELAY", "CANCEL"}
     assert all("label" in item and "score" in item for item in restored)
     assert all("pareto_efficient" in item for item in restored)
+    assert all("objective_score" in item for item in restored)
 
 
 def test_turnaround_sensitivity_returns_ordered_scenarios(schedule_df):

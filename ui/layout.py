@@ -55,7 +55,7 @@ def empty_gantt_fig() -> go.Figure:
 
 # ─── Header ───────────────────────────────────────────────────────────────────
 
-def build_header() -> html.Div:
+def build_header(data_source_label: str) -> html.Div:
     return html.Div(className="app-header", children=[
         html.Div(className="header-brand", children=[
             html.Div(className="brand-title", children=[
@@ -80,7 +80,7 @@ def build_header() -> html.Div:
             ]),
             html.Div(className="indicator", children=[
                 html.Div("DATA SOURCE", className="ind-label"),
-                html.Div("SYNTHETIC · OTHH", className="ind-value",
+                html.Div(data_source_label, className="ind-value",
                          style={"fontSize": "11px"}),
             ]),
         ]),
@@ -267,6 +267,7 @@ def build_recovery_panel() -> html.Div:
                 ])
             ]
         ),
+        html.Div(id="optimizer-summary", className="mc-network-stats"),
     ])
 
 
@@ -347,9 +348,9 @@ def build_sensitivity_panel() -> html.Div:
 
 # ─── Root Layout ──────────────────────────────────────────────────────────────
 
-def build_layout(flight_options: list) -> html.Div:
+def build_layout(flight_options: list, data_source_label: str) -> html.Div:
     return html.Div([
-        build_header(),
+        build_header(data_source_label),
         html.Div(className="main-grid", children=[
             build_control_panel(flight_options),
             build_network_panel(),

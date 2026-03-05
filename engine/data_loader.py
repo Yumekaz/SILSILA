@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 
 logger = logging.getLogger(__name__)
+REQUEST_HEADERS = {"User-Agent": "SILSILA/1.0 (educational ops simulator)"}
 
 # ─────────────────────────────────────────────
 from engine.config import (
@@ -124,6 +125,7 @@ def _fallback_for_open_sky(df: pd.DataFrame) -> pd.DataFrame:
     normalized["status"] = "landed"
     normalized["block_time_h"] = 6.0
     normalized["turnaround_slack_min"] = 0.0
+    normalized.attrs["data_source"] = "opensky-arrivals-partial"
     return normalized
 
 
@@ -154,6 +156,7 @@ def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
         resp = requests.get(
             OPENSKY_URL,
             params={"airport": OTHH, "begin": start, "end": end},
+            headers=REQUEST_HEADERS,
             timeout=10
         )
         resp.raise_for_status()
@@ -180,7 +183,9 @@ def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
 
         if not flights:
             return None
-        return _fallback_for_open_sky(pd.DataFrame(flights))
+        normalized = _fallback_for_open_sky(pd.DataFrame(flights))
+        normalized.attrs["data_source"] = "opensky-arrivals-partial"
+        return normalized
 
     except Exception as exc:
         logger.warning("OpenSky unavailable (%s). Using synthetic data.", exc)
@@ -323,6 +328,7 @@ def build_synthetic_schedule(base_date: datetime | None = None) -> pd.DataFrame:
 
     df["turnaround_slack_min"] = df.get("turnaround_slack_min", pd.Series(dtype=float)).fillna(0)
     df = df.reset_index(drop=True)
+    df.attrs["data_source"] = "synthetic-hub-schedule"
     return df
 
 
@@ -338,6 +344,7 @@ def load_schedule(date: datetime | None = None, use_opensky: bool = True) -> pd.
         df = fetch_from_opensky(date)
         if df is not None and len(df) > 5 and _schedule_is_usable(df):
             logger.info("Loaded %d flights from OpenSky.", len(df))
+            df.attrs["data_source"] = df.attrs.get("data_source", "opensky")
             return df
         if df is not None and len(df) > 0:
             logger.info(
@@ -347,4 +354,6 @@ def load_schedule(date: datetime | None = None, use_opensky: bool = True) -> pd.
         else:
             logger.info("Using synthetic schedule.")
 
-    return build_synthetic_schedule(date)
+    synthetic = build_synthetic_schedule(date)
+    synthetic.attrs["data_source"] = "synthetic-hub-schedule"
+    return synthetic

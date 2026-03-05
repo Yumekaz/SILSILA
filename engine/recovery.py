@@ -86,6 +86,7 @@ class RecoveryOption:
     residual_events:    list = field(default_factory=list)
     pareto_efficient:   bool = False
     recommendation:     str = ""
+    objective_score:    float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

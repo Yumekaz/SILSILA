@@ -64,6 +64,7 @@ def serialize_recovery_options(options) -> str:
             "score": option.score,
             "pareto_efficient": option.pareto_efficient,
             "recommendation": option.recommendation,
+            "objective_score": getattr(option, "objective_score", None),
         }
         for option in options
     ]
