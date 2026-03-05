@@ -7,6 +7,12 @@ Primary:   OpenSky Network REST API (free, real historical data)
 Fallback:  Synthetic schedule built from real QR routes + realistic timing
 """
 
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="urllib3 .* doesn't match a supported version!",
+    module="requests",
+)
 import requests
 import pandas as pd
 import numpy as np
@@ -37,14 +43,16 @@ QR_FLEET = {
 
 # One representative crew per aircraft (simplified - real ops has many)
 CREW_ASSIGNMENTS = {
+    # Intentionally shared across selected aircraft to create realistic
+    # cross-aircraft crew dependencies for cascade modeling.
     "A7-APA": "CREW-01",
+    "A7-ALC": "CREW-01",
     "A7-BAA": "CREW-02",
-    "A7-BAB": "CREW-03",
+    "A7-BAB": "CREW-02",
     "A7-ALA": "CREW-04",
-    "A7-ALB": "CREW-05",
-    "A7-ALC": "CREW-06",
+    "A7-ALB": "CREW-04",
     "A7-BEA": "CREW-07",
-    "A7-BEB": "CREW-08",
+    "A7-BEB": "CREW-07",
 }
 
 

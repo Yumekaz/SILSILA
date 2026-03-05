@@ -15,6 +15,7 @@ import networkx as nx
 from engine.cascade import run_cascade, cascaded_schedule
 from engine.recovery import evaluate_all_recovery_options, RecoveryOption
 from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
+from engine.config import MC_SCENARIOS
 
 # ── Color palette (matches CSS variables) ─────────────────────────────────────
 COLORS = {
@@ -614,7 +615,7 @@ def register_phase3_callbacks(app, G, df):
         if not n_clicks:
             raise PreventUpdate
 
-        mc = run_monte_carlo(G, df, n_scenarios=500)
+        mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
         ns = mc.network_summary
 
         # ── Status bar ──────────────────────────────────────────────────────
@@ -860,7 +861,7 @@ def register_phase3_callbacks(app, G, df):
 
         # Re-run MC if no stored result (lightweight)
         from engine.monte_carlo import run_monte_carlo, MonteCarloResult
-        mc = run_monte_carlo(G, df, n_scenarios=500)
+        mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             path = tmp.name

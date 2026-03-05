@@ -78,3 +78,12 @@ doha_cascade/
 
 ## Tech Stack
 `NetworkX` · `Plotly Dash` · `Pandas` · `NumPy` · `SciPy` · `Requests`
+
+---
+
+## Test Suite
+Run the smoke tests to verify data loading, graph build, cascade, recovery, Monte Carlo, and PDF generation:
+
+```bash
+pytest -q
+```

@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from engine.config import (
     MIN_TURNAROUND_MINUTES,
     MIN_PAX_CONNECT_MIN,
+    MAX_CREW_CONNECT_MIN,
 )
 
 
@@ -109,6 +110,9 @@ def build_graph(df: pd.DataFrame) -> nx.DiGraph:
             if pd.isna(inb["arr_actual"]) or pd.isna(oub["dep_scheduled"]):
                 continue
             slack_min    = (oub["dep_scheduled"] - inb["arr_actual"]).total_seconds() / 60
+            # Keep crew transfer edges in a realistic handover window.
+            if not (60 <= slack_min <= MAX_CREW_CONNECT_MIN):
+                continue
             vulnerability = max(0.0, min(1.0, 1.0 - (slack_min / 120.0)))
 
             G.add_edge(
@@ -131,6 +135,10 @@ def build_graph(df: pd.DataFrame) -> nx.DiGraph:
 
         for _, oub in outbound_flights.iterrows():
             if pd.isna(oub["dep_scheduled"]):
+                continue
+            # Preserve stronger constraints already established on this pair
+            # (e.g., ROTATION or CREW). DiGraph supports one edge per pair.
+            if G.has_edge(inb["flight_id"], oub["flight_id"]):
                 continue
             # Only flights where passengers might realistically connect
             connection_window_min = (oub["dep_scheduled"] - inb["arr_actual"]).total_seconds() / 60

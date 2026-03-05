@@ -24,7 +24,7 @@ import networkx as nx
 import pandas as pd
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import logging
 
@@ -151,13 +151,13 @@ def run_cascade(
         return CascadeResult(
             trigger_flight=trigger_flight_id,
             trigger_delay_min=trigger_delay_min,
-            simulation_time=datetime.utcnow()
+            simulation_time=datetime.now(timezone.utc)
         )
 
     result = CascadeResult(
         trigger_flight=trigger_flight_id,
         trigger_delay_min=trigger_delay_min,
-        simulation_time=datetime.utcnow()
+        simulation_time=datetime.now(timezone.utc)
     )
 
     # BFS queue: (flight_id, delay_minutes, depth, path_so_far)

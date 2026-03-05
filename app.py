@@ -16,6 +16,7 @@ import pandas as pd
 
 from engine.data_loader   import load_schedule
 from engine.graph_builder import build_graph, graph_summary
+from engine.config        import USE_OPENSKY_BY_DEFAULT
 from ui.layout            import build_layout
 from ui.callbacks         import register_callbacks, register_phase3_callbacks
 
@@ -35,7 +36,7 @@ def main():
     # ── Load schedule ──────────────────────────────────────────────────────────
     logger.info("Loading DOH schedule …")
     today = datetime.now(tz=timezone.utc)
-    df    = load_schedule(date=today, use_opensky=True)
+    df    = load_schedule(date=today, use_opensky=USE_OPENSKY_BY_DEFAULT)
     logger.info("Schedule: %d flights", len(df))
 
     # ── Build dependency graph ─────────────────────────────────────────────────

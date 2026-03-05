@@ -7,11 +7,13 @@ Centralized configuration constants for the SILSILA cascade engine.
 # ── API & Data Constants ───────────────────────────────────────────────────────
 OTHH = "OTHH"
 OPENSKY_URL = "https://opensky-network.org/api/flights/arrival"
+USE_OPENSKY_BY_DEFAULT = False
 
 # ── Operational Constraints (Minutes) ──────────────────────────────────────────
 MIN_TURNAROUND_MINUTES = 45          # Minimum ground time for aircraft
 CREW_MIN_REST_MINUTES = 10 * 60      # 10 hours between duties
 MIN_PAX_CONNECT_MIN = 45             # Minimum passenger connection time
+MAX_CREW_CONNECT_MIN = 240           # Max realistic crew transfer window (inbound→outbound)
 
 # ── Financial Benchmarks (USD) ─────────────────────────────────────────────────
 # IATA / industry-standard delay cost benchmarks (USD per minute)
