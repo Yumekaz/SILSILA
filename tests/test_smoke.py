@@ -11,6 +11,12 @@ from engine.cascade import run_cascade, cascaded_schedule
 from engine.recovery import evaluate_all_recovery_options
 from engine.monte_carlo import run_monte_carlo, build_heatmap_data
 from engine.pdf_report import generate_pdf_report
+from ui.callbacks import (
+    _deserialize_cascade_store,
+    _deserialize_mc_store,
+    _serialize_cascade_result,
+    _serialize_recovery_options,
+)
 
 
 @pytest.fixture(scope="module")
@@ -58,6 +64,37 @@ def test_recovery_options_are_ranked_and_complete(schedule_df, dependency_graph)
     assert all(options[i].score >= options[i + 1].score for i in range(len(options) - 1))
     assert {o.strategy for o in options} == {"SWAP", "DELAY", "CANCEL"}
     assert all(0 <= o.score <= 100 for o in options)
+
+
+def test_recovery_preserves_crew_residuals(schedule_df, dependency_graph):
+    result = run_cascade(dependency_graph, "QR052", 90.0)
+    assert any(event.edge_type == "CREW" for event in result.events)
+
+    options = {opt.strategy: opt for opt in evaluate_all_recovery_options(dependency_graph, schedule_df, result)}
+    crew_event = next(event for event in result.events if event.edge_type == "CREW")
+
+    for strategy in ("SWAP", "DELAY"):
+        option = options[strategy]
+        assert any(event.edge_type == "CREW" for event in option.residual_events)
+
+        row = option.df_recovered[option.df_recovered["flight_id"] == crew_event.flight_id].iloc[0]
+        if row["direction"] == "inbound":
+            assert row["arr_delay_min"] >= crew_event.delay_min
+        else:
+            assert row["dep_delay_min"] >= crew_event.delay_min
+
+
+def test_recovery_preserves_outbound_trigger_delay(schedule_df, dependency_graph):
+    outbound_id = schedule_df[schedule_df["direction"] == "outbound"].iloc[0]["flight_id"]
+    result = run_cascade(dependency_graph, outbound_id, 45.0)
+    options = evaluate_all_recovery_options(dependency_graph, schedule_df, result)
+
+    for option in options:
+        if option.df_recovered is None:
+            continue
+        row = option.df_recovered[option.df_recovered["flight_id"] == outbound_id].iloc[0]
+        assert row["status"] == "trigger"
+        assert row["dep_delay_min"] == pytest.approx(45.0)
 
 
 def test_monte_carlo_and_heatmap_shapes(schedule_df, dependency_graph):
@@ -114,3 +151,71 @@ def test_pdf_generation_smoke(schedule_df, dependency_graph, tmp_path: Path):
     assert written_path == str(out)
     assert out.exists()
     assert out.stat().st_size > 0
+
+
+def test_deserialize_mc_store_rebuilds_summary_and_profiles():
+    mc_store = """{
+        "n_scenarios": 12,
+        "mean_flights_affected": 2.5,
+        "p50_flights_affected": 2.0,
+        "p90_flights_affected": 5.0,
+        "p99_flights_affected": 7.0,
+        "mean_cost_usd": 1000,
+        "p50_cost_usd": 900,
+        "p90_cost_usd": 2000,
+        "p99_cost_usd": 3000,
+        "mean_total_delay": 44.0,
+        "p90_total_delay": 90.0,
+        "zero_cascade_pct": 25.0,
+        "critical_scenario_pct": 8.0,
+        "top_triggers": [["QR021", 12345.0]],
+        "risk_profiles": {
+            "QR021": {
+                "risk_label": "HIGH",
+                "risk_score": 0.42,
+                "victim_probability": 0.33,
+                "trigger_avg_cost": 12345.0,
+                "direction": "inbound",
+                "origin": "KJFK",
+                "destination": "OTHH",
+                "aircraft_type": "A350-1000"
+            }
+        }
+    }"""
+
+    mc = _deserialize_mc_store(mc_store)
+
+    assert mc is not None
+    assert mc.n_scenarios == 12
+    assert mc.network_summary.n_scenarios == 12
+    assert mc.network_summary.top_triggers == [["QR021", 12345.0]]
+    assert mc.risk_profiles["QR021"].risk_label == "HIGH"
+
+
+def test_cascade_store_round_trip_preserves_events(schedule_df, dependency_graph):
+    trigger_id = schedule_df.iloc[0]["flight_id"]
+    result = run_cascade(dependency_graph, trigger_id, 25.0)
+
+    payload = _serialize_cascade_result(result, dependency_graph)
+    restored = _deserialize_cascade_store(payload)
+
+    assert restored is not None
+    assert restored["trigger"] == trigger_id
+    assert restored["trigger_delay_min"] == 25.0
+    assert len(restored["events"]) == len(result.events)
+    if restored["events"]:
+        first = restored["events"][0]
+        assert first["direction"] in {"inbound", "outbound"}
+        assert "propagation_path" in first
+
+
+def test_recovery_options_serialize_for_export(schedule_df, dependency_graph):
+    trigger_id = schedule_df.iloc[0]["flight_id"]
+    result = run_cascade(dependency_graph, trigger_id, 30.0)
+    options = evaluate_all_recovery_options(dependency_graph, schedule_df, result)
+
+    payload = _serialize_recovery_options(options)
+
+    assert len(payload) == 3
+    assert {item["strategy"] for item in payload} == {"SWAP", "DELAY", "CANCEL"}
+    assert all("label" in item and "score" in item for item in payload)

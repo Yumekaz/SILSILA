@@ -102,6 +102,65 @@ def _flight_row(df: pd.DataFrame, flight_id: str) -> Optional[pd.Series]:
     return df[mask].iloc[0]
 
 
+def _apply_trigger_delay(df: pd.DataFrame, trigger_id: str, delay_min: float) -> None:
+    """Apply the primary trigger delay regardless of flight direction."""
+    trigger_mask = df["flight_id"] == trigger_id
+    if not trigger_mask.any():
+        return
+
+    direction = df.loc[trigger_mask, "direction"].values[0]
+    if direction == "inbound":
+        df.loc[trigger_mask, "arr_actual"] = (
+            df.loc[trigger_mask, "arr_actual"] +
+            pd.to_timedelta(delay_min, unit="m")
+        )
+        df.loc[trigger_mask, "arr_delay_min"] += delay_min
+    else:
+        df.loc[trigger_mask, "dep_actual"] = (
+            df.loc[trigger_mask, "dep_actual"] +
+            pd.to_timedelta(delay_min, unit="m")
+        )
+        df.loc[trigger_mask, "dep_delay_min"] += delay_min
+    df.loc[trigger_mask, "status"] = "trigger"
+
+
+def _apply_event_delay(df: pd.DataFrame, event, status: str | None = None) -> tuple[int, float]:
+    """Apply one cascade event to the correct time column and return (pax, cost)."""
+    mask = df["flight_id"] == event.flight_id
+    if not mask.any():
+        return 0, 0.0
+
+    direction = df.loc[mask, "direction"].values[0]
+    if direction == "inbound":
+        df.loc[mask, "arr_actual"] = (
+            df.loc[mask, "arr_actual"] +
+            pd.to_timedelta(event.delay_min, unit="m")
+        )
+        df.loc[mask, "arr_delay_min"] += event.delay_min
+    else:
+        df.loc[mask, "dep_actual"] = (
+            df.loc[mask, "dep_actual"] +
+            pd.to_timedelta(event.delay_min, unit="m")
+        )
+        df.loc[mask, "dep_delay_min"] += event.delay_min
+
+    applied_status = status
+    if applied_status is None:
+        applied_status = (
+            "critical" if event.delay_min >= 120
+            else "delayed_high" if event.delay_min >= 60
+            else "delayed"
+        )
+    df.loc[mask, "status"] = applied_status
+
+    pax = int(df.loc[mask, "pax"].values[0])
+    cost = (
+        event.delay_min * COST_AIRCRAFT_PER_MIN +
+        event.delay_min * pax * COST_PAX_PER_MIN
+    )
+    return pax, cost
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Heuristic 1: SWAP
 # Replace the delayed aircraft with a spare from the DOH ground pool.
@@ -152,15 +211,8 @@ def heuristic_swap(
     # ── Build recovered schedule ─────────────────────────────────────────────
     df_rec = df.copy()
 
-    # Apply trigger delay to inbound (it still lands late — we can't fix that)
-    trigger_mask = df_rec["flight_id"] == trigger_id
-    if df_rec.loc[trigger_mask, "direction"].values[0] == "inbound":
-        df_rec.loc[trigger_mask, "arr_actual"] = (
-            df_rec.loc[trigger_mask, "arr_actual"] +
-            pd.to_timedelta(result.trigger_delay_min, unit="m")
-        )
-        df_rec.loc[trigger_mask, "arr_delay_min"] += result.trigger_delay_min
-    df_rec.loc[trigger_mask, "status"] = "trigger"
+    # The trigger flight itself remains delayed even if a downstream recovery is chosen.
+    _apply_trigger_delay(df_rec, trigger_id, result.trigger_delay_min)
 
     # Find the ROTATION successors (outbound flights on the same aircraft)
     rotation_successors = [
@@ -215,29 +267,25 @@ def heuristic_swap(
             df_rec.loc[out_mask, "status"] = "recovered"
             action_log.append(f"  {out_id}: departs on time via spare ✓")
 
-    # PAX_CNXN events survive — apply their delays
-    pax_cnxn_events = [e for e in result.events if e.edge_type == "PAX_CNXN"]
-    for event in pax_cnxn_events:
-        mask = df_rec["flight_id"] == event.flight_id
-        if not mask.any():
+    # Only rotation effects are mitigated by a spare; crew and pax impacts still survive.
+    residual_events = [e for e in result.events if e.edge_type != "ROTATION"]
+    for event in residual_events:
+        pax, event_cost = _apply_event_delay(df_rec, event, status="delayed")
+        if pax == 0 and event_cost == 0.0:
             continue
-        df_rec.loc[mask, "dep_actual"] = (
-            df_rec.loc[mask, "dep_actual"] +
-            pd.to_timedelta(event.delay_min, unit="m")
-        )
-        df_rec.loc[mask, "dep_delay_min"] += event.delay_min
-        df_rec.loc[mask, "status"] = "delayed"
         residual_delay_min += event.delay_min
-        row = df_rec[mask].iloc[0]
-        pax = int(row.get("pax", 0))
-        residual_cost += (
-            event.delay_min * COST_AIRCRAFT_PER_MIN +
-            event.delay_min * pax * COST_PAX_PER_MIN
-        )
+        residual_cost += event_cost
         if event.flight_id not in residual_flights:
             residual_flights.add(event.flight_id)
             residual_pax_affected += pax
-        action_log.append(f"  {event.flight_id}: {event.pax_stranded} pax stranded (connection missed — swap cannot fix)")
+        if event.edge_type == "PAX_CNXN":
+            action_log.append(
+                f"  {event.flight_id}: {event.pax_stranded} pax stranded (connection missed — swap cannot fix)"
+            )
+        else:
+            action_log.append(
+                f"  {event.flight_id}: +{event.delay_min:.0f}m residual via {event.edge_type.lower()} dependency"
+            )
 
     # ── Cost calculation ─────────────────────────────────────────────────────
     direct_cost      = SWAP_POSITIONING_COST
@@ -273,14 +321,14 @@ def heuristic_swap(
         baseline_pax_affected=result.total_pax_affected,
         recovered_pax_affected=residual_pax_affected,
         pax_saved=pax_saved,
-        pax_stranded=sum(e.pax_stranded for e in pax_cnxn_events),
+        pax_stranded=sum(e.pax_stranded for e in residual_events if e.edge_type == "PAX_CNXN"),
         direct_cost_usd=round(direct_cost, 0),
         cascade_cost_saved=round(cost_saved, 0),
         net_cost_usd=round(total_cost, 0),
         score=round(score, 1),
         df_recovered=df_rec,
         action_log=action_log,
-        residual_events=[e for e in result.events if e.edge_type == "PAX_CNXN"],
+        residual_events=residual_events,
     )
 
 
@@ -315,15 +363,7 @@ def heuristic_delay(
 
     df_rec = df.copy()
 
-    # Apply trigger delay first
-    trigger_mask = df_rec["flight_id"] == trigger_id
-    if df_rec.loc[trigger_mask, "direction"].values[0] == "inbound":
-        df_rec.loc[trigger_mask, "arr_actual"] = (
-            df_rec.loc[trigger_mask, "arr_actual"] +
-            pd.to_timedelta(result.trigger_delay_min, unit="m")
-        )
-        df_rec.loc[trigger_mask, "arr_delay_min"] += result.trigger_delay_min
-    df_rec.loc[trigger_mask, "status"] = "trigger"
+    _apply_trigger_delay(df_rec, trigger_id, result.trigger_delay_min)
 
     # Compression savings per ROTATION edge
     turnaround_saving = MIN_TURNAROUND_MINUTES - COMPRESS_TURNAROUND_MINUTES  # 7 min
@@ -383,6 +423,17 @@ def heuristic_delay(
                 total_residual_pax += pax
             action_log.append(
                 f"  {event.flight_id}: pax connection delay unchanged (+{event.delay_min:.0f}m)"
+            )
+
+        else:
+            pax, event_cost = _apply_event_delay(df_rec, event)
+            total_residual_delay += event.delay_min
+            total_residual_cost += event_cost
+            if event.flight_id not in residual_flights:
+                residual_flights.add(event.flight_id)
+                total_residual_pax += pax
+            action_log.append(
+                f"  {event.flight_id}: +{event.delay_min:.0f}m unchanged via {event.edge_type.lower()} dependency"
             )
 
     # ── Cost ──────────────────────────────────────────────────────────────────
@@ -487,15 +538,7 @@ def heuristic_cancel(
     # ── Build recovered schedule ─────────────────────────────────────────────
     df_rec = df.copy()
 
-    # Apply trigger delay to inbound
-    trigger_mask = df_rec["flight_id"] == trigger_id
-    if df_rec.loc[trigger_mask, "direction"].values[0] == "inbound":
-        df_rec.loc[trigger_mask, "arr_actual"] = (
-            df_rec.loc[trigger_mask, "arr_actual"] +
-            pd.to_timedelta(result.trigger_delay_min, unit="m")
-        )
-        df_rec.loc[trigger_mask, "arr_delay_min"] += result.trigger_delay_min
-    df_rec.loc[trigger_mask, "status"] = "trigger"
+    _apply_trigger_delay(df_rec, trigger_id, result.trigger_delay_min)
 
     # Cancel the target flight
     cancel_mask = df_rec["flight_id"] == target_id
@@ -517,21 +560,9 @@ def heuristic_cancel(
         if not mask.any():
             continue
 
-        df_rec.loc[mask, "dep_actual"] = (
-            df_rec.loc[mask, "dep_actual"] +
-            pd.to_timedelta(event.delay_min, unit="m")
-        )
-        df_rec.loc[mask, "dep_delay_min"] += event.delay_min
-
-        sev = "critical" if event.delay_min >= 120 else "delayed_high" if event.delay_min >= 60 else "delayed"
-        df_rec.loc[mask, "status"] = sev
-
+        pax, event_cost = _apply_event_delay(df_rec, event)
         residual_delay_min += event.delay_min
-        pax = df_rec.loc[mask, "pax"].values[0]
-        residual_cost += (
-            event.delay_min * COST_AIRCRAFT_PER_MIN +
-            event.delay_min * int(pax) * COST_PAX_PER_MIN
-        )
+        residual_cost += event_cost
         if event.flight_id not in residual_flights:
             residual_flights.add(event.flight_id)
             residual_pax_affected += int(pax)
