@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from engine.data_loader import REQUIRED_COLUMNS, load_schedule
@@ -11,11 +12,12 @@ from engine.cascade import run_cascade, cascaded_schedule
 from engine.recovery import evaluate_all_recovery_options
 from engine.monte_carlo import run_monte_carlo, build_heatmap_data
 from engine.pdf_report import generate_pdf_report
-from ui.callbacks import (
-    _deserialize_cascade_store,
-    _deserialize_mc_store,
-    _serialize_cascade_result,
-    _serialize_recovery_options,
+from ui.session_state import (
+    deserialize_cascade_store,
+    deserialize_mc_store,
+    deserialize_recovery_store,
+    serialize_cascade_result,
+    serialize_recovery_options,
 )
 
 
@@ -44,6 +46,28 @@ def test_graph_builds_and_has_core_edge_types(dependency_graph):
         assert summary["edge_types"].get(edge_type, 0) >= 1
 
 
+def test_rotation_edges_match_aircraft_and_schedule_slack(schedule_df, dependency_graph):
+    rotation_edges = [
+        (u, v, data) for u, v, data in dependency_graph.edges(data=True)
+        if data.get("edge_type") == "ROTATION"
+    ]
+
+    assert rotation_edges
+    for u, v, data in rotation_edges:
+        inb = schedule_df[schedule_df["flight_id"] == u].iloc[0]
+        out = schedule_df[schedule_df["flight_id"] == v].iloc[0]
+
+        assert inb["direction"] == "inbound"
+        assert out["direction"] == "outbound"
+        assert inb["aircraft_reg"] == out["aircraft_reg"]
+
+        expected_slack = round(
+            (out["dep_scheduled"] - inb["arr_actual"]).total_seconds() / 60 - 45,
+            1,
+        )
+        assert data["slack_min"] == pytest.approx(expected_slack)
+
+
 def test_cascade_pipeline_returns_consistent_outputs(schedule_df, dependency_graph):
     trigger_id = schedule_df.iloc[0]["flight_id"]
     result = run_cascade(dependency_graph, trigger_id, 30.0)
@@ -53,6 +77,27 @@ def test_cascade_pipeline_returns_consistent_outputs(schedule_df, dependency_gra
     assert result.trigger_delay_min == 30.0
     assert len(cascaded_df) == len(schedule_df)
     assert "status" in cascaded_df.columns
+
+
+def test_cascaded_schedule_updates_correct_time_column(schedule_df, dependency_graph):
+    inbound_id = schedule_df[schedule_df["direction"] == "inbound"].iloc[0]["flight_id"]
+    outbound_id = schedule_df[schedule_df["direction"] == "outbound"].iloc[0]["flight_id"]
+
+    inbound_result = run_cascade(dependency_graph, inbound_id, 25.0)
+    outbound_result = run_cascade(dependency_graph, outbound_id, 40.0)
+
+    inbound_df = cascaded_schedule(schedule_df, dependency_graph, inbound_result)
+    outbound_df = cascaded_schedule(schedule_df, dependency_graph, outbound_result)
+
+    inbound_row_before = schedule_df[schedule_df["flight_id"] == inbound_id].iloc[0]
+    inbound_row_after = inbound_df[inbound_df["flight_id"] == inbound_id].iloc[0]
+    assert inbound_row_after["arr_delay_min"] == pytest.approx(inbound_row_before["arr_delay_min"] + 25.0)
+    assert pd.isna(inbound_row_after["dep_actual"])
+
+    outbound_row_before = schedule_df[schedule_df["flight_id"] == outbound_id].iloc[0]
+    outbound_row_after = outbound_df[outbound_df["flight_id"] == outbound_id].iloc[0]
+    assert outbound_row_after["dep_delay_min"] == pytest.approx(outbound_row_before["dep_delay_min"] + 40.0)
+    assert pd.isna(outbound_row_after["arr_actual"])
 
 
 def test_recovery_options_are_ranked_and_complete(schedule_df, dependency_graph):
@@ -183,7 +228,7 @@ def test_deserialize_mc_store_rebuilds_summary_and_profiles():
         }
     }"""
 
-    mc = _deserialize_mc_store(mc_store)
+    mc = deserialize_mc_store(mc_store)
 
     assert mc is not None
     assert mc.n_scenarios == 12
@@ -196,8 +241,8 @@ def test_cascade_store_round_trip_preserves_events(schedule_df, dependency_graph
     trigger_id = schedule_df.iloc[0]["flight_id"]
     result = run_cascade(dependency_graph, trigger_id, 25.0)
 
-    payload = _serialize_cascade_result(result, dependency_graph)
-    restored = _deserialize_cascade_store(payload)
+    payload = serialize_cascade_result(result, dependency_graph)
+    restored = deserialize_cascade_store(payload)
 
     assert restored is not None
     assert restored["trigger"] == trigger_id
@@ -214,8 +259,9 @@ def test_recovery_options_serialize_for_export(schedule_df, dependency_graph):
     result = run_cascade(dependency_graph, trigger_id, 30.0)
     options = evaluate_all_recovery_options(dependency_graph, schedule_df, result)
 
-    payload = _serialize_recovery_options(options)
+    payload = serialize_recovery_options(options)
+    restored = deserialize_recovery_store(payload)
 
-    assert len(payload) == 3
-    assert {item["strategy"] for item in payload} == {"SWAP", "DELAY", "CANCEL"}
-    assert all("label" in item and "score" in item for item in payload)
+    assert len(restored) == 3
+    assert {item["strategy"] for item in restored} == {"SWAP", "DELAY", "CANCEL"}
+    assert all("label" in item and "score" in item for item in restored)

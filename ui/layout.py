@@ -326,6 +326,7 @@ def build_layout(flight_options: list) -> html.Div:
         # Hidden stores
         dcc.Store(id="cascade-result-store"),
         dcc.Store(id="schedule-store"),
+        dcc.Store(id="recovery-options-store"),
         dcc.Store(id="selected-recovery-store"),
         dcc.Store(id="mc-result-store"),
     ])

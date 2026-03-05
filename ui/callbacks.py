@@ -5,18 +5,24 @@ All Dash callback functions — the reactive layer between UI and engine.
 Network graph now uses dash-cytoscape for smooth native zoom/pan.
 """
 
-import json
 from datetime import datetime, timezone
 from dash import Input, Output, State, html
 import plotly.graph_objects as go
 import pandas as pd
 import networkx as nx
-from types import SimpleNamespace
+import json
 
 from engine.cascade import run_cascade, cascaded_schedule
-from engine.recovery import evaluate_all_recovery_options, RecoveryOption
+from engine.recovery import evaluate_all_recovery_options
 from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
 from engine.config import MC_SCENARIOS
+from ui.session_state import (
+    deserialize_cascade_store,
+    deserialize_mc_store,
+    deserialize_recovery_store,
+    serialize_cascade_result,
+    serialize_recovery_options,
+)
 
 # ── Color palette (matches CSS variables) ─────────────────────────────────────
 COLORS = {
@@ -45,104 +51,6 @@ COLORS = {
 }
 
 FONT = dict(family="JetBrains Mono, monospace")
-
-
-def _event_direction(G, flight_id: str) -> str:
-    """Return a flight direction for report/export payloads."""
-    if flight_id in G.nodes:
-        return G.nodes[flight_id].get("direction", "outbound")
-    return "outbound"
-
-
-def _serialize_cascade_result(result, G) -> str:
-    """Persist the current cascade result as JSON for export/reuse."""
-    payload = result.summary()
-    payload["events"] = [
-        {
-            "flight_id": e.flight_id,
-            "direction": _event_direction(G, e.flight_id),
-            "edge_type": e.edge_type,
-            "delay_min": e.delay_min,
-            "pax_affected": e.pax_affected,
-            "pax_stranded": e.pax_stranded,
-            "cost_usd": e.cost_usd,
-            "severity": e.severity,
-            "caused_by": e.caused_by,
-            "propagation_path": e.propagation_path,
-        }
-        for e in result.events
-    ]
-    return json.dumps(payload)
-
-
-def _deserialize_cascade_store(cascade_store: str | None) -> dict | None:
-    """Read back the stored cascade payload, if any."""
-    if not cascade_store:
-        return None
-    try:
-        payload = json.loads(cascade_store)
-    except (TypeError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _serialize_recovery_options(options: list[RecoveryOption]) -> list[dict]:
-    """Reduce recovery options to a stable, exportable payload."""
-    return [
-        {
-            "strategy": o.strategy,
-            "label": o.label,
-            "feasible": o.feasible,
-            "delay_reduction_min": o.delay_reduction_min,
-            "delay_reduction_pct": o.delay_reduction_pct,
-            "direct_cost_usd": o.direct_cost_usd,
-            "net_cost_usd": o.net_cost_usd,
-            "pax_saved": o.pax_saved,
-            "score": o.score,
-        }
-        for o in options
-    ]
-
-
-def _deserialize_mc_store(mc_store: str | None):
-    """Rebuild a minimal MonteCarloResult-like object from stored JSON."""
-    if not mc_store:
-        return None
-
-    try:
-        payload = json.loads(mc_store)
-    except (TypeError, json.JSONDecodeError):
-        return None
-
-    risk_profiles = {}
-    for fid, profile in payload.get("risk_profiles", {}).items():
-        risk_profiles[fid] = SimpleNamespace(**profile)
-
-    summary = SimpleNamespace(
-        n_scenarios=payload.get("n_scenarios", 0),
-        mean_flights_affected=payload.get("mean_flights_affected", 0.0),
-        p50_flights_affected=payload.get("p50_flights_affected", 0.0),
-        p90_flights_affected=payload.get("p90_flights_affected", 0.0),
-        p99_flights_affected=payload.get("p99_flights_affected", 0.0),
-        mean_cost_usd=payload.get("mean_cost_usd", 0.0),
-        p50_cost_usd=payload.get("p50_cost_usd", 0.0),
-        p90_cost_usd=payload.get("p90_cost_usd", 0.0),
-        p99_cost_usd=payload.get("p99_cost_usd", 0.0),
-        mean_total_delay=payload.get("mean_total_delay", 0.0),
-        p90_total_delay=payload.get("p90_total_delay", 0.0),
-        zero_cascade_pct=payload.get("zero_cascade_pct", 0.0),
-        critical_scenario_pct=payload.get("critical_scenario_pct", 0.0),
-        top_triggers=payload.get("top_triggers", []),
-    )
-
-    return SimpleNamespace(
-        scenarios=[None] * int(payload.get("n_scenarios", 0)),
-        risk_profiles=risk_profiles,
-        network_summary=summary,
-        delay_samples=[],
-        cost_samples=[],
-        n_scenarios=int(payload.get("n_scenarios", 0)),
-    )
 
 
 def register_callbacks(app, G, df):
@@ -254,6 +162,7 @@ def register_callbacks(app, G, df):
         Output("summary-metrics",        "children"),
         Output("recovery-cards",         "children"),
         Output("recovery-status-badge",  "children"),
+        Output("recovery-options-store", "data"),
         Input("trigger-btn",  "n_clicks"),
         Input("reset-btn",    "n_clicks"),
         State("flight-select","value"),
@@ -277,6 +186,7 @@ def register_callbacks(app, G, df):
                 html.Div(),
                 empty_recovery,
                 "AWAITING CASCADE",
+                None,
             )
 
         if not flight_id or not delay_min:
@@ -289,6 +199,7 @@ def register_callbacks(app, G, df):
                 html.Div(),
                 empty_recovery,
                 "AWAITING CASCADE",
+                None,
             )
 
         # ── Phase 1: Run cascade ───────────────────────────────────────────────
@@ -300,7 +211,7 @@ def register_callbacks(app, G, df):
         recovery_options = evaluate_all_recovery_options(G, df, result)
 
         return (
-            _serialize_cascade_result(result, G),
+            serialize_cascade_result(result, G),
             build_cyto_elements(G, df_cascaded, flight_id, affected_ids),
             CYTO_STYLESHEET,
             _build_cascade_log(result),
@@ -309,6 +220,7 @@ def register_callbacks(app, G, df):
             _build_summary_metrics(result),
             _build_recovery_cards(recovery_options),
             f"{len([o for o in recovery_options if o.feasible])} OPTIONS READY",
+            serialize_recovery_options(recovery_options),
         )
 
     # ── Apply selected recovery to Gantt + graph ───────────────────────────────
@@ -928,10 +840,11 @@ def register_phase3_callbacks(app, G, df):
         State("flight-select",   "value"),
         State("delay-slider",    "value"),
         State("mc-result-store", "data"),
+        State("recovery-options-store", "data"),
         State("selected-recovery-store", "data"),
         prevent_initial_call=True
     )
-    def export_pdf(n_clicks, cascade_store, flight_id, delay_min, mc_store, selected_recovery_store):
+    def export_pdf(n_clicks, cascade_store, flight_id, delay_min, mc_store, recovery_store, selected_recovery_store):
         if not n_clicks:
             raise PreventUpdate
 
@@ -945,26 +858,24 @@ def register_phase3_callbacks(app, G, df):
             except (TypeError, json.JSONDecodeError, AttributeError):
                 selected_strategy = None
 
-        cascade_dict = _deserialize_cascade_store(cascade_store)
+        cascade_dict = deserialize_cascade_store(cascade_store)
         if cascade_dict is None:
             result = run_cascade(G, flight_id, float(delay_min))
-            cascade_dict = json.loads(_serialize_cascade_result(result, G))
-            options = evaluate_all_recovery_options(G, df, result)
-        else:
-            options = evaluate_all_recovery_options(
-                G,
-                df,
-                run_cascade(G, flight_id, float(delay_min))
+            cascade_dict = json.loads(serialize_cascade_result(result, G))
+        options = deserialize_recovery_store(recovery_store)
+        if not options:
+            result = run_cascade(G, flight_id, float(delay_min))
+            options = deserialize_recovery_store(
+                serialize_recovery_options(evaluate_all_recovery_options(G, df, result))
             )
-
-        opt_dicts = _serialize_recovery_options(options)
+        opt_dicts = [dict(option) for option in options]
         if selected_strategy:
             for option in opt_dicts:
                 if option["strategy"] == selected_strategy:
                     option["label"] = f"{option['label']} [SELECTED]"
                     break
 
-        mc = _deserialize_mc_store(mc_store)
+        mc = deserialize_mc_store(mc_store)
         if mc is None:
             from engine.monte_carlo import run_monte_carlo
             mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
