@@ -15,16 +15,14 @@ Higher weight = delay propagates more aggressively through this edge.
 
 import networkx as nx
 import pandas as pd
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
-from engine.data_loader import MIN_TURNAROUND_MINUTES
-
-# Minimum passenger connection time at DOH (minutes)
-MIN_PAX_CONNECT_MIN = 45
-
-# IATA delay cost benchmarks (USD per minute)
-COST_PER_PAX_PER_MIN  = 0.85     # passenger inconvenience / EU261 liability exposure
-COST_AIRCRAFT_PER_MIN = 160.0    # ground handling + fuel burn + slot costs
+from engine.config import (
+    MIN_TURNAROUND_MINUTES,
+    MIN_PAX_CONNECT_MIN,
+    COST_PAX_PER_MIN,
+    COST_AIRCRAFT_PER_MIN
+)
 
 
 def build_graph(df: pd.DataFrame) -> nx.DiGraph:
@@ -197,9 +195,10 @@ def compute_node_positions(G: nx.DiGraph) -> dict:
     for flight_id, data in G.nodes(data=True):
         ref = data.get("ref_time")
         if ref is None or str(ref) == "NaT":
-            x = 12.0
+            # Fallback to a mid-day-ish UTC time if missing
+            x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
         else:
-            x = ref.hour + ref.minute / 60.0
+            x = ref
 
         y = aircraft_y.get(data.get("aircraft_reg", ""), 0)
 
@@ -209,6 +208,6 @@ def compute_node_positions(G: nx.DiGraph) -> dict:
         else:
             y -= 0.15
 
-        positions[flight_id] = (round(x, 3), round(y, 3))
+        positions[flight_id] = (x, round(y, 3))
 
     return positions

@@ -21,6 +21,7 @@ Algorithm: Modified BFS on the dependency graph.
 """
 
 import networkx as nx
+import pandas as pd
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -29,9 +30,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Cost benchmarks (USD/minute) — IATA-derived industry averages
-COST_PAX_PER_MIN     = 0.85    # per passenger per delay minute
-COST_AIRCRAFT_PER_MIN = 160.0  # ground + slot + handling
+from engine.config import COST_PAX_PER_MIN, COST_AIRCRAFT_PER_MIN
 
 
 @dataclass
@@ -240,8 +239,6 @@ def cascaded_schedule(
     Apply cascade delays to the schedule DataFrame and return the updated version.
     Used for Gantt chart rendering.
     """
-    import pandas as pd
-
     df = df_original.copy()
 
     # Apply trigger delay

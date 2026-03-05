@@ -16,12 +16,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
-# Constants
-# ─────────────────────────────────────────────
-OTHH = "OTHH"                        # ICAO code for Doha Hamad Intl
-OPENSKY_URL = "https://opensky-network.org/api/flights/arrival"
-MIN_TURNAROUND_MINUTES = 45          # Qatar minimum ground time at DOH
-CREW_MIN_REST_MINUTES = 10 * 60      # 10 hours between duties (simplified)
+from engine.config import (
+    OTHH,
+    OPENSKY_URL,
+    MIN_TURNAROUND_MINUTES,
+    CREW_MIN_REST_MINUTES
+)
 
 # Real Qatar Airways fleet sample (tail → aircraft type → seats)
 QR_FLEET = {

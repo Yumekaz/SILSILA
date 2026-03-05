@@ -43,7 +43,7 @@ COLORS = {
 FONT = dict(family="JetBrains Mono, monospace")
 
 
-def register_callbacks(app, G, df):
+def register_callbacks(app, G, df, positions):
     """Register all callbacks. Called from app.py after Dash is initialised."""
 
     # ── Live clock ─────────────────────────────────────────────────────────────
@@ -155,7 +155,7 @@ def register_callbacks(app, G, df):
         if triggered == "reset-btn":
             return (
                 None,
-                _build_network_fig(G, df, None, None),
+                _build_network_fig(G, df, positions, None, None),
                 _empty_log(),
                 "0 AFFECTED",
                 _build_gantt(df, None),
@@ -163,7 +163,7 @@ def register_callbacks(app, G, df):
             )
 
         if not flight_id or not delay_min:
-            return (None, _build_network_fig(G, df, None, None),
+            return (None, _build_network_fig(G, df, positions, None, None),
                     _empty_log(), "0 AFFECTED", _build_gantt(df, None), html.Div())
 
         # Run cascade engine
@@ -177,7 +177,7 @@ def register_callbacks(app, G, df):
 
         return (
             json.dumps(summary),
-            _build_network_fig(G, df_cascaded, flight_id, affected_ids),
+            _build_network_fig(G, df_cascaded, positions, flight_id, affected_ids),
             _build_cascade_log(result),
             f"{result.flights_affected} AFFECTED",
             _build_gantt(df_cascaded, result),
@@ -191,7 +191,7 @@ def register_callbacks(app, G, df):
         prevent_initial_call=True
     )
     def highlight_selected(flight_id):
-        return _build_network_fig(G, df, flight_id, set())
+        return _build_network_fig(G, df, positions, flight_id, set())
 
 
 # ── Figure builders ────────────────────────────────────────────────────────────
@@ -219,14 +219,13 @@ def _node_color(flight_id: str, df_current: pd.DataFrame,
 def _build_network_fig(
     G: nx.DiGraph,
     df: pd.DataFrame,
+    positions: dict,
     trigger_id: str | None,
     affected_ids: set | None,
 ) -> go.Figure:
     """Render the flight dependency network as a Plotly figure."""
     if affected_ids is None:
         affected_ids = set()
-
-    positions = compute_node_positions(G)
 
     # ── Edges ──────────────────────────────────────────────────────────────────
     edge_traces = []
@@ -239,12 +238,14 @@ def _build_network_fig(
         for u, v, d in G.edges(data=True):
             if d.get("edge_type") != edge_type:
                 continue
-            x0, y0 = positions.get(u, (0, 0))
-            x1, y1 = positions.get(v, (0, 0))
+            def_x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+            x0, y0 = positions.get(u, (def_x, 0))
+            x1, y1 = positions.get(v, (def_x, 0))
             ex += [x0, x1, None]
             ey += [y0, y1, None]
 
         if ex:
+            def_x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
             opacity = 0.9 if (trigger_id and any(
                 G.has_edge(u, v) and (u == trigger_id or v == trigger_id or
                            u in affected_ids or v in affected_ids)
@@ -263,8 +264,9 @@ def _build_network_fig(
     node_x, node_y, node_color, node_size = [], [], [], []
     node_text, node_hover = [], []
 
+    def_x = datetime.now(tz=timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
     for flight_id, data in G.nodes(data=True):
-        x, y = positions.get(flight_id, (12, 0))
+        x, y = positions.get(flight_id, (def_x, 0))
         node_x.append(x)
         node_y.append(y)
 
@@ -323,6 +325,7 @@ def _build_network_fig(
         showlegend=False,
         hovermode="closest",
         xaxis=dict(
+            type="date",
             visible=True, showgrid=True,
             gridcolor="rgba(28,45,72,0.5)",
             zeroline=False, showticklabels=True,

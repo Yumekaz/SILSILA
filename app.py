@@ -1,7 +1,7 @@
 """
 app.py
 ------
-Doha Hub Disruption Cascade Simulator — Phase 1
+SILSILA — Phase 1
 Run:  python app.py
 Open: http://localhost:8050
 """
@@ -14,7 +14,7 @@ import dash
 import pandas as pd
 
 from engine.data_loader   import load_schedule
-from engine.graph_builder import build_graph, graph_summary
+from engine.graph_builder import build_graph, graph_summary, compute_node_positions
 from ui.layout            import build_layout
 from ui.callbacks         import register_callbacks
 
@@ -44,6 +44,9 @@ def main():
         " | ".join(f"{k}:{v}" for k, v in summary["edge_types"].items())
     )
 
+    logger.info("Computing node positions for layout caching …")
+    positions = compute_node_positions(G)
+
     # ── Build flight selector options ──────────────────────────────────────────
     flight_options = []
     for _, row in df.sort_values("flight_id").iterrows():
@@ -59,7 +62,7 @@ def main():
     # ── Initialise Dash ────────────────────────────────────────────────────────
     app = dash.Dash(
         __name__,
-        title="QR Cascade Sim · DOH",
+        title="SILSILA · DOH",
         update_title=None,
         suppress_callback_exceptions=True,
         meta_tags=[
@@ -69,11 +72,11 @@ def main():
     )
     app.layout = build_layout(flight_options)
 
-    # Register all callbacks (pass G and df into closure)
-    register_callbacks(app, G, df)
+    # Register all callbacks (pass G, df, and cached positions into closure)
+    register_callbacks(app, G, df, positions)
 
     logger.info("─" * 60)
-    logger.info("  DOHA CASCADE SIMULATOR  ·  Phase 1")
+    logger.info("  SILSILA  ·  Phase 1")
     logger.info("  http://localhost:8050")
     logger.info("─" * 60)
 

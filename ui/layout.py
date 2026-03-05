@@ -57,7 +57,7 @@ def build_header() -> html.Div:
     return html.Div(className="app-header", children=[
         html.Div(className="header-brand", children=[
             html.Div(className="brand-title", children=[
-                html.Span("QR"), " CASCADE SIM"
+                html.Span("SIL"), "SILA"
             ]),
             html.Div("HAMAD INTL · DOH/OTHH · PHASE 1", className="brand-sub"),
         ]),
