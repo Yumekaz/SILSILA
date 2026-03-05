@@ -13,6 +13,7 @@ import networkx as nx
 
 from engine.cascade import run_cascade, cascaded_schedule
 from engine.graph_builder import compute_node_positions
+from engine.recovery import evaluate_all_recovery_options, RecoveryOption
 
 # ── Color palette (matches CSS variables) ─────────────────────────────────────
 COLORS = {
@@ -134,23 +135,31 @@ def register_callbacks(app, G, df, positions):
             ]),
         ])
 
+    # ── Color extras for recovery ──────────────────────────────────────────────
+    COLORS["recovered"]  = "#1A7A4A"
+    COLORS["cancelled"]  = "#4A1A2A"
+
     # ── Main simulation callback ───────────────────────────────────────────────
     @app.callback(
-        Output("cascade-result-store", "data"),
-        Output("network-graph",        "figure"),
-        Output("cascade-log",          "children"),
-        Output("affected-count",       "children"),
-        Output("gantt-chart",          "figure"),
-        Output("summary-metrics",      "children"),
+        Output("cascade-result-store",   "data"),
+        Output("network-graph",          "figure"),
+        Output("cascade-log",            "children"),
+        Output("affected-count",         "children"),
+        Output("gantt-chart",            "figure"),
+        Output("summary-metrics",        "children"),
+        Output("recovery-cards",         "children"),
+        Output("recovery-status-badge",  "children"),
         Input("trigger-btn",  "n_clicks"),
         Input("reset-btn",    "n_clicks"),
         State("flight-select","value"),
         State("delay-slider", "value"),
         prevent_initial_call=True
     )
-    def run_simulation(trigger_clicks, reset_clicks, flight_id, delay_min,):
+    def run_simulation(trigger_clicks, reset_clicks, flight_id, delay_min):
         from dash import ctx
         triggered = ctx.triggered_id
+
+        empty_recovery = _empty_recovery_cards()
 
         if triggered == "reset-btn":
             return (
@@ -160,20 +169,29 @@ def register_callbacks(app, G, df, positions):
                 "0 AFFECTED",
                 _build_gantt(df, None),
                 html.Div(),
+                empty_recovery,
+                "AWAITING CASCADE",
             )
 
         if not flight_id or not delay_min:
-            return (None, _build_network_fig(G, df, positions, None, None),
-                    _empty_log(), "0 AFFECTED", _build_gantt(df, None), html.Div())
+            return (
+                None,
+                _build_network_fig(G, df, positions, None, None),
+                _empty_log(), "0 AFFECTED",
+                _build_gantt(df, None),
+                html.Div(),
+                empty_recovery,
+                "AWAITING CASCADE",
+            )
 
-        # Run cascade engine
-        result = run_cascade(G, flight_id, float(delay_min))
-        summary = result.summary()
-
-        # Cascaded schedule for Gantt
+        # ── Phase 1: Run cascade ───────────────────────────────────────────────
+        result      = run_cascade(G, flight_id, float(delay_min))
+        summary     = result.summary()
         df_cascaded = cascaded_schedule(df, G, result)
-
         affected_ids = {e.flight_id for e in result.events}
+
+        # ── Phase 2: Evaluate recovery options ─────────────────────────────────
+        recovery_options = evaluate_all_recovery_options(G, df, result)
 
         return (
             json.dumps(summary),
@@ -182,6 +200,46 @@ def register_callbacks(app, G, df, positions):
             f"{result.flights_affected} AFFECTED",
             _build_gantt(df_cascaded, result),
             _build_summary_metrics(result),
+            _build_recovery_cards(recovery_options),
+            f"{len([o for o in recovery_options if o.feasible])} OPTIONS READY",
+        )
+
+    # ── Apply selected recovery to Gantt ───────────────────────────────────────
+    @app.callback(
+        Output("gantt-chart",          "figure", allow_duplicate=True),
+        Output("network-graph",        "figure", allow_duplicate=True),
+        Output("selected-recovery-store", "data"),
+        Input({"type": "recovery-select-btn", "index": 0}, "n_clicks"),
+        Input({"type": "recovery-select-btn", "index": 1}, "n_clicks"),
+        Input({"type": "recovery-select-btn", "index": 2}, "n_clicks"),
+        State("flight-select",  "value"),
+        State("delay-slider",   "value"),
+        prevent_initial_call=True
+    )
+    def apply_recovery(c0, c1, c2, flight_id, delay_min):
+        from dash import ctx
+        if not ctx.triggered_id or not flight_id or not delay_min:
+            raise Exception("No trigger")
+
+        triggered_idx = ctx.triggered_id.get("index", 0)
+
+        result   = run_cascade(G, flight_id, float(delay_min))
+        options  = evaluate_all_recovery_options(G, df, result)
+
+        if triggered_idx >= len(options):
+            raise Exception("Index out of range")
+
+        selected = options[triggered_idx]
+        if not selected.feasible or selected.df_recovered is None:
+            raise Exception("Not feasible")
+
+        df_rec       = selected.df_recovered
+        affected_ids = {e.flight_id for e in selected.residual_events}
+
+        return (
+            _build_gantt(df_rec, result, recovery_label=selected.label),
+            _build_network_fig(G, df_rec, positions, flight_id, affected_ids),
+            selected.strategy,
         )
 
     # ── Network graph on flight selection (no simulation) ──────────────────────
@@ -332,99 +390,22 @@ def _build_network_fig(
             tickfont=dict(family="JetBrains Mono", size=9, color=COLORS["text_3"]),
             tickformat="%H:%M",
             title=dict(text="TIME (UTC)", font=dict(size=9, color=COLORS["text_3"])),
+            fixedrange=False,
         ),
-        yaxis=dict(visible=False, showgrid=False, zeroline=False),
+        yaxis=dict(
+            visible=True,
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            fixedrange=False,
+        ),
+        uirevision="constant",
         dragmode="pan",
     )
     return fig
 
 
-def _build_gantt(df: pd.DataFrame, result) -> go.Figure:
-    """Horizontal Gantt — one bar per flight, colored by status."""
-    rows = []
-    for _, r in df.iterrows():
-        if r["direction"] == "inbound":
-            if pd.isna(r.get("arr_scheduled")) or pd.isna(r.get("arr_actual")):
-                continue
-            start = r["arr_scheduled"]
-            end   = r["arr_actual"]
-        else:
-            if pd.isna(r.get("dep_scheduled")) or pd.isna(r.get("dep_actual")):
-                continue
-            start = r["dep_scheduled"]
-            end   = r["dep_actual"]
-
-        # Make sure we have at least 5 min bar width for visibility
-        if (end - start).total_seconds() < 300:
-            end = start + pd.Timedelta(minutes=5)
-
-        rows.append({
-            "flight":    r["flight_id"],
-            "start":     start,
-            "end":       end,
-            "status":    r.get("status", "scheduled"),
-            "aircraft":  r.get("aircraft_reg", ""),
-            "direction": r["direction"],
-        })
-
-    if not rows:
-        return go.Figure()
-
-    status_colors = {
-        "scheduled":    COLORS["normal"],
-        "landed":       COLORS["landed"],
-        "trigger":      COLORS["trigger"],
-        "delayed":      COLORS["delayed"],
-        "delayed_high": COLORS["orange"],
-        "critical":     COLORS["critical"],
-    }
-
-    fig = go.Figure()
-    for row in sorted(rows, key=lambda x: x["start"]):
-        color = status_colors.get(row["status"], COLORS["normal"])
-        fig.add_trace(go.Bar(
-            x=[(row["end"] - row["start"]).total_seconds() / 60],
-            y=[row["flight"]],
-            base=[row["start"]],
-            orientation="h",
-            marker=dict(color=color, opacity=0.85, line=dict(width=0)),
-            hovertemplate=(
-                f"<b>{row['flight']}</b><br>"
-                f"{row['direction'].upper()} · {row['aircraft']}<br>"
-                f"Start: {row['start'].strftime('%H:%M')}<br>"
-                f"End:   {row['end'].strftime('%H:%M')}<br>"
-                f"Status: {row['status'].upper()}"
-                "<extra></extra>"
-            ),
-            showlegend=False,
-            name=row["flight"],
-        ))
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor ="rgba(0,0,0,0)",
-        margin=dict(l=90, r=10, t=4, b=30),
-        barmode="overlay",
-        font=dict(family="JetBrains Mono", color=COLORS["text_2"], size=10),
-        xaxis=dict(
-            type="date",
-            showgrid=True, gridcolor="rgba(28,45,72,0.6)",
-            zeroline=False,
-            tickfont=dict(size=9, color=COLORS["text_3"]),
-            tickformat="%H:%M",
-        ),
-        yaxis=dict(
-            showgrid=False, zeroline=False,
-            tickfont=dict(size=9, color=COLORS["text_3"]),
-            autorange="reversed",
-        ),
-        hoverlabel=dict(
-            bgcolor=COLORS["bg_2"],
-            bordercolor=COLORS["border"],
-            font=dict(family="JetBrains Mono", size=11, color=COLORS["text_1"]),
-        ),
-    )
-    return fig
+# _build_gantt defined below with recovery_label parameter
 
 
 def _build_cascade_log(result) -> list:
@@ -507,3 +488,235 @@ def _empty_log() -> list:
                  style={"opacity": "0.5", "textTransform": "none",
                         "letterSpacing": "0"}),
     ])]
+
+
+# ── Recovery UI Builders ───────────────────────────────────────────────────────
+
+def _empty_recovery_cards() -> list:
+    return [html.Div(className="log-empty", children=[
+        html.Div("◈", className="icon"),
+        html.Div("RUN SIMULATION FIRST"),
+        html.Div("Recovery options appear after cascade analysis",
+                 style={"opacity": "0.5", "textTransform": "none", "letterSpacing": "0"}),
+    ])]
+
+
+def _build_recovery_cards(options: list) -> list:
+    """Build side-by-side recovery option cards."""
+    if not options:
+        return _empty_recovery_cards()
+
+    STRATEGY_COLORS = {
+        "SWAP":   {"accent": "#00C8FF", "dim": "#006A87", "icon": "⇄"},
+        "DELAY":  {"accent": "#E8A020", "dim": "#9B6B14", "icon": "⏱"},
+        "CANCEL": {"accent": "#FF3D5A", "dim": "#7A1A2A", "icon": "✕"},
+    }
+
+    SCORE_LABEL = {
+        (80, 100): ("RECOMMENDED", "#00D4A0"),
+        (50, 80):  ("VIABLE",      "#E8A020"),
+        (0, 50):   ("COSTLY",      "#FF6B35"),
+    }
+
+    def score_badge(score):
+        for (lo, hi), (label, color) in SCORE_LABEL.items():
+            if lo <= score <= hi:
+                return label, color
+        return "REVIEW", "#8CA0C0"
+
+    cards = []
+    for idx, opt in enumerate(options):
+        sc      = STRATEGY_COLORS.get(opt.strategy, {"accent": "#8CA0C0", "dim": "#4A6080", "icon": "?"})
+        s_label, s_color = score_badge(opt.score)
+
+        if not opt.feasible:
+            card = html.Div(className="recovery-card recovery-card-infeasible", children=[
+                html.Div(className="rc-header", children=[
+                    html.Span(sc["icon"], className="rc-icon",
+                              style={"color": COLORS["text_3"]}),
+                    html.Span(opt.label, className="rc-title",
+                              style={"color": COLORS["text_3"]}),
+                    html.Span("INFEASIBLE", className="rc-score-badge",
+                              style={"color": COLORS["text_3"], "borderColor": COLORS["border"]}),
+                ]),
+                html.Div(opt.infeasibility_reason, className="rc-desc",
+                         style={"color": COLORS["text_3"]}),
+            ])
+        else:
+            # Score bar width
+            bar_pct = max(4, int(opt.score))
+
+            card = html.Div(
+                className="recovery-card",
+                style={"borderTopColor": sc["accent"]},
+                children=[
+                    # Header
+                    html.Div(className="rc-header", children=[
+                        html.Span(sc["icon"], className="rc-icon",
+                                  style={"color": sc["accent"]}),
+                        html.Span(opt.label, className="rc-title",
+                                  style={"color": sc["accent"]}),
+                        html.Span(s_label, className="rc-score-badge",
+                                  style={"color": s_color, "borderColor": s_color}),
+                    ]),
+
+                    # Score bar
+                    html.Div(className="rc-score-bar-bg", children=[
+                        html.Div(className="rc-score-bar-fill",
+                                 style={"width": f"{bar_pct}%",
+                                        "background": sc["accent"]}),
+                    ]),
+
+                    # Description
+                    html.Div(opt.description, className="rc-desc"),
+
+                    # Metrics grid
+                    html.Div(className="rc-metrics", children=[
+                        html.Div(className="rc-metric", children=[
+                            html.Div("DELAY CUT",  className="rc-metric-key"),
+                            html.Div(f"{opt.delay_reduction_min:.0f}m",
+                                     className="rc-metric-val",
+                                     style={"color": sc["accent"]}),
+                            html.Div(f"({opt.delay_reduction_pct:.0f}%)",
+                                     className="rc-metric-sub"),
+                        ]),
+                        html.Div(className="rc-metric", children=[
+                            html.Div("DIRECT COST", className="rc-metric-key"),
+                            html.Div(f"${opt.direct_cost_usd:,.0f}",
+                                     className="rc-metric-val",
+                                     style={"color": COLORS["text_2"]}),
+                            html.Div("activation", className="rc-metric-sub"),
+                        ]),
+                        html.Div(className="rc-metric", children=[
+                            html.Div("NET COST",   className="rc-metric-key"),
+                            html.Div(f"${opt.net_cost_usd:,.0f}",
+                                     className="rc-metric-val",
+                                     style={"color": COLORS["text_1"]}),
+                            html.Div("vs baseline", className="rc-metric-sub"),
+                        ]),
+                        html.Div(className="rc-metric", children=[
+                            html.Div("PAX SAVED",  className="rc-metric-key"),
+                            html.Div(str(opt.pax_saved),
+                                     className="rc-metric-val",
+                                     style={"color": COLORS["teal"]}),
+                            html.Div(f"{opt.pax_stranded} stranded", className="rc-metric-sub"),
+                        ]),
+                    ]),
+
+                    # Expandable action log
+                    html.Details(className="rc-log-details", children=[
+                        html.Summary("▸ ACTION LOG", className="rc-log-toggle"),
+                        html.Div(className="rc-log-body", children=[
+                            html.Div(line, className="rc-log-line") for line in opt.action_log
+                        ]),
+                    ]),
+
+                    # Apply button
+                    html.Button(
+                        f"APPLY {opt.strategy}",
+                        id={"type": "recovery-select-btn", "index": idx},
+                        className="rc-apply-btn",
+                        style={"borderColor": sc["accent"], "color": sc["accent"]},
+                        n_clicks=0,
+                    ),
+                ]
+            )
+        cards.append(card)
+
+    return [html.Div(className="recovery-cards-grid", children=cards)]
+
+
+def _build_gantt(df: pd.DataFrame, result, recovery_label: str = None) -> go.Figure:
+    """Horizontal Gantt — one bar per flight, colored by status."""
+    rows = []
+    for _, r in df.iterrows():
+        if r["direction"] == "inbound":
+            if pd.isna(r.get("arr_scheduled")) or pd.isna(r.get("arr_actual")):
+                continue
+            start = r["arr_scheduled"]
+            end   = r["arr_actual"]
+        else:
+            if pd.isna(r.get("dep_scheduled")) or pd.isna(r.get("dep_actual")):
+                continue
+            start = r["dep_scheduled"]
+            end   = r["dep_actual"]
+
+        if (end - start).total_seconds() < 300:
+            end = start + pd.Timedelta(minutes=5)
+
+        rows.append({
+            "flight":    r["flight_id"],
+            "start":     start,
+            "end":       end,
+            "status":    r.get("status", "scheduled"),
+            "aircraft":  r.get("aircraft_reg", ""),
+            "direction": r["direction"],
+        })
+
+    if not rows:
+        from ui.layout import empty_gantt_fig
+        return empty_gantt_fig()
+
+    status_colors = {
+        "scheduled":    COLORS["normal"],
+        "landed":       "#2A5A4A",
+        "trigger":      COLORS["cyan"],
+        "delayed":      COLORS["delayed"],
+        "delayed_high": COLORS["orange"],
+        "critical":     COLORS["red"],
+        "recovered":    "#1A7A4A",
+        "cancelled":    "#4A1A2A",
+    }
+
+    fig = go.Figure()
+    for row in sorted(rows, key=lambda x: x["start"]):
+        color = status_colors.get(row["status"], COLORS["normal"])
+        opacity = 0.4 if row["status"] == "cancelled" else 0.85
+        fig.add_trace(go.Bar(
+            x=[(row["end"] - row["start"]).total_seconds() / 60],
+            y=[row["flight"]],
+            base=[row["start"]],
+            orientation="h",
+            marker=dict(color=color, opacity=opacity, line=dict(width=0)),
+            hovertemplate=(
+                f"<b>{row['flight']}</b><br>"
+                f"{row['direction'].upper()} · {row['aircraft']}<br>"
+                f"Start: {row['start'].strftime('%H:%M')}<br>"
+                f"End:   {row['end'].strftime('%H:%M')}<br>"
+                f"Status: {row['status'].upper()}"
+                "<extra></extra>"
+            ),
+            showlegend=False,
+            name=row["flight"],
+        ))
+
+    title_text = f"AFTER RECOVERY: {recovery_label}" if recovery_label else ""
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor ="rgba(0,0,0,0)",
+        margin=dict(l=90, r=10, t=4 if not recovery_label else 24, b=30),
+        barmode="overlay",
+        title=dict(text=title_text, font=dict(
+            family="Barlow Condensed", size=12,
+            color="#00D4A0"), x=0.01) if recovery_label else {},
+        font=dict(family="JetBrains Mono", color=COLORS["text_2"], size=10),
+        xaxis=dict(
+            type="date",
+            showgrid=True, gridcolor="rgba(28,45,72,0.6)",
+            zeroline=False,
+            tickfont=dict(size=9, color=COLORS["text_3"]),
+            tickformat="%H:%M",
+        ),
+        yaxis=dict(
+            showgrid=False, zeroline=False,
+            tickfont=dict(size=9, color=COLORS["text_3"]),
+            autorange="reversed",
+        ),
+        hoverlabel=dict(
+            bgcolor=COLORS["bg_2"],
+            bordercolor=COLORS["border"],
+            font=dict(family="JetBrains Mono", size=11, color=COLORS["text_1"]),
+        ),
+    )
+    return fig

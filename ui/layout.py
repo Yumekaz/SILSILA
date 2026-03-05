@@ -59,7 +59,7 @@ def build_header() -> html.Div:
             html.Div(className="brand-title", children=[
                 html.Span("SIL"), "SILA"
             ]),
-            html.Div("HAMAD INTL · DOH/OTHH · PHASE 1", className="brand-sub"),
+            html.Div("HAMAD INTL · DOH/OTHH · PHASE 2", className="brand-sub"),
         ]),
         html.Div(className="header-indicators", children=[
             html.Div(className="indicator", children=[
@@ -182,7 +182,12 @@ def build_network_panel() -> html.Div:
             dcc.Graph(
                 id="network-graph",
                 figure=empty_network_fig(),
-                config={"displayModeBar": False, "scrollZoom": True},
+                config={
+                    "displayModeBar": True,
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                    "modeBarButtonsToRemove": ["lasso2d", "select2d", "zoom2d"]
+                },
                 style={"height": "100%", "width": "100%"},
             ),
         ]),
@@ -228,6 +233,34 @@ def build_gantt_panel() -> html.Div:
     ])
 
 
+def build_recovery_panel() -> html.Div:
+    """Phase 2: Recovery options comparison panel — shown after cascade simulation."""
+    return html.Div(className="recovery-panel", id="recovery-panel", children=[
+        html.Div(className="panel-header", children=[
+            html.Span("RECOVERY OPTIONS", className="panel-title"),
+            html.Div([
+                html.Span("PHASE 2", className="panel-badge",
+                          style={"marginRight": "6px"}),
+                html.Span("AWAITING CASCADE", className="panel-badge",
+                          id="recovery-status-badge"),
+            ]),
+        ]),
+        html.Div(
+            id="recovery-cards",
+            className="recovery-cards-empty",
+            children=[
+                html.Div(className="log-empty", children=[
+                    html.Div("◈", className="icon"),
+                    html.Div("RUN SIMULATION FIRST"),
+                    html.Div("Recovery options appear after cascade analysis",
+                             style={"opacity": "0.5", "textTransform": "none",
+                                    "letterSpacing": "0"}),
+                ])
+            ]
+        ),
+    ])
+
+
 # ─── Root Layout ──────────────────────────────────────────────────────────────
 
 def build_layout(flight_options: list) -> html.Div:
@@ -238,9 +271,11 @@ def build_layout(flight_options: list) -> html.Div:
             build_network_panel(),
             build_cascade_log_panel(),
         ]),
+        build_recovery_panel(),
         build_gantt_panel(),
 
         # Hidden stores for state
         dcc.Store(id="cascade-result-store"),
         dcc.Store(id="schedule-store"),
+        dcc.Store(id="selected-recovery-store"),
     ])
