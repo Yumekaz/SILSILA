@@ -720,3 +720,292 @@ def _build_gantt(df: pd.DataFrame, result, recovery_label: str = None) -> go.Fig
         ),
     )
     return fig
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PHASE 3 — Monte Carlo + PDF Export Callbacks
+# ══════════════════════════════════════════════════════════════════════════════
+
+def register_phase3_callbacks(app, G, df):
+    """Phase 3 callbacks — Monte Carlo runner and PDF export."""
+    from engine.monte_carlo import run_monte_carlo, build_heatmap_data
+    from engine.recovery import evaluate_all_recovery_options
+    from engine.cascade import run_cascade
+    from engine.pdf_report import generate_pdf_report
+    import plotly.graph_objects as go
+    import json, os, base64, tempfile
+    from dash import Input, Output, State, html, dcc
+    from dash.exceptions import PreventUpdate
+
+    # ── Monte Carlo runner ─────────────────────────────────────────────────────
+    @app.callback(
+        Output("mc-status-bar",    "children"),
+        Output("mc-charts",        "children"),
+        Output("mc-network-stats", "children"),
+        Output("mc-result-store",  "data"),
+        Input("mc-run-btn", "n_clicks"),
+        prevent_initial_call=True
+    )
+    def run_mc(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+
+        mc = run_monte_carlo(G, df, n_scenarios=500)
+        ns = mc.network_summary
+
+        # ── Status bar ──────────────────────────────────────────────────────
+        status = html.Div(className="mc-status-done", children=[
+            html.Span(f"✓  {ns.n_scenarios} scenarios · {ns.runtime_seconds:.2f}s",
+                      style={"color": COLORS["teal"],
+                             "fontFamily": "JetBrains Mono", "fontSize": "11px"}),
+            html.Span(f"  |  {ns.zero_cascade_pct:.1f}% no cascade  "
+                      f"|  {ns.critical_scenario_pct:.1f}% critical",
+                      style={"color": COLORS["text_3"],
+                             "fontFamily": "JetBrains Mono", "fontSize": "11px"}),
+        ])
+
+        # ── Cascade cost distribution histogram ──────────────────────────────
+        cost_fig = go.Figure()
+        cost_fig.add_trace(go.Histogram(
+            x=mc.cost_samples,
+            nbinsx=50,
+            marker=dict(color=COLORS["gold"], opacity=0.75,
+                        line=dict(width=0)),
+            name="Cascade Cost",
+        ))
+        cost_fig.add_vline(
+            x=ns.p90_cost_usd, line_dash="dash",
+            line_color=COLORS["orange"], line_width=1.5,
+            annotation_text=f"P90 ${ns.p90_cost_usd:,.0f}",
+            annotation_font=dict(color=COLORS["orange"],
+                                 family="JetBrains Mono", size=9),
+        )
+        cost_fig.add_vline(
+            x=ns.p99_cost_usd, line_dash="dash",
+            line_color=COLORS["red"], line_width=1.5,
+            annotation_text=f"P99 ${ns.p99_cost_usd:,.0f}",
+            annotation_font=dict(color=COLORS["red"],
+                                 family="JetBrains Mono", size=9),
+        )
+        cost_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=50, r=20, t=28, b=40),
+            title=dict(text="CASCADE COST DISTRIBUTION",
+                       font=dict(family="Barlow Condensed", size=11,
+                                 color=COLORS["text_3"]), x=0),
+            font=dict(family="JetBrains Mono", color=COLORS["text_2"], size=9),
+            xaxis=dict(showgrid=True, gridcolor="rgba(28,45,72,0.5)",
+                       zeroline=False,
+                       title=dict(text="Cost (USD)", font=dict(size=9))),
+            yaxis=dict(showgrid=True, gridcolor="rgba(28,45,72,0.5)",
+                       zeroline=False,
+                       title=dict(text="Scenarios", font=dict(size=9))),
+            showlegend=False,
+        )
+
+        # ── Delay distribution histogram ─────────────────────────────────────
+        delay_fig = go.Figure()
+        delay_fig.add_trace(go.Histogram(
+            x=mc.delay_samples,
+            nbinsx=40,
+            marker=dict(color=COLORS["cyan"], opacity=0.70,
+                        line=dict(width=0)),
+            name="Initial Delay",
+        ))
+        delay_fig.add_vline(
+            x=17.5, line_dash="dot",
+            line_color=COLORS["teal"], line_width=1.5,
+            annotation_text="EUROCONTROL avg 17.5m",
+            annotation_font=dict(color=COLORS["teal"],
+                                 family="JetBrains Mono", size=9),
+        )
+        delay_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=50, r=20, t=28, b=40),
+            title=dict(text="SAMPLED DELAY DISTRIBUTION (LOGNORMAL)",
+                       font=dict(family="Barlow Condensed", size=11,
+                                 color=COLORS["text_3"]), x=0),
+            font=dict(family="JetBrains Mono", color=COLORS["text_2"], size=9),
+            xaxis=dict(showgrid=True, gridcolor="rgba(28,45,72,0.5)",
+                       zeroline=False, range=[0, 200],
+                       title=dict(text="Initial Delay (min)", font=dict(size=9))),
+            yaxis=dict(showgrid=True, gridcolor="rgba(28,45,72,0.5)",
+                       zeroline=False,
+                       title=dict(text="Scenarios", font=dict(size=9))),
+            showlegend=False,
+        )
+
+        # ── Risk heatmap ─────────────────────────────────────────────────────
+        hm = build_heatmap_data(mc, G)
+
+        heatmap_fig = go.Figure(data=go.Heatmap(
+            z=hm["z"],
+            x=hm["x"],
+            y=hm["y"],
+            text=hm["annots"],
+            texttemplate="%{text}",
+            colorscale=[
+                [0.0, COLORS["bg_2"]],
+                [0.3, "#1A4A6A"],
+                [0.6, COLORS["gold"]],
+                [0.85, COLORS["orange"]],
+                [1.0, COLORS["red"]],
+            ],
+            showscale=True,
+            colorbar=dict(
+                thickness=10,
+                tickfont=dict(family="JetBrains Mono", size=8,
+                              color=COLORS["text_3"]),
+                tickcolor=COLORS["text_3"],
+            ),
+            hoverongaps=False,
+            hovertemplate=(
+                "<b>%{x}</b><br>%{y}: %{text}<extra></extra>"
+            ),
+        ))
+        heatmap_fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=130, r=20, t=28, b=60),
+            title=dict(text="PER-FLIGHT RISK HEATMAP",
+                       font=dict(family="Barlow Condensed", size=11,
+                                 color=COLORS["text_3"]), x=0),
+            font=dict(family="JetBrains Mono", color=COLORS["text_2"], size=9),
+            xaxis=dict(tickfont=dict(size=9), tickangle=-40),
+            yaxis=dict(tickfont=dict(size=9)),
+            hoverlabel=dict(
+                bgcolor=COLORS["bg_2"],
+                bordercolor=COLORS["border"],
+                font=dict(family="JetBrains Mono", size=11,
+                          color=COLORS["text_1"]),
+            ),
+        )
+
+        charts = [
+            html.Div(className="mc-chart-cell", children=[
+                dcc.Graph(figure=cost_fig, config={"displayModeBar": False},
+                          style={"height": "220px"}),
+            ]),
+            html.Div(className="mc-chart-cell", children=[
+                dcc.Graph(figure=delay_fig, config={"displayModeBar": False},
+                          style={"height": "220px"}),
+            ]),
+            html.Div(className="mc-chart-cell mc-chart-wide", children=[
+                dcc.Graph(figure=heatmap_fig, config={"displayModeBar": False},
+                          style={"height": "220px"}),
+            ]),
+        ]
+
+        # ── Network summary stats ─────────────────────────────────────────────
+        top_trig = ns.top_triggers[:3]
+        stats = html.Div(className="mc-stats-row", children=[
+            html.Div(className="metric-box gold", children=[
+                html.Div("MEAN CASCADE / SCENARIO", className="metric-key"),
+                html.Div(f"{ns.mean_flights_affected:.1f} flights", className="metric-val"),
+            ]),
+            html.Div(className="metric-box red", children=[
+                html.Div("P90 COST", className="metric-key"),
+                html.Div(f"${ns.p90_cost_usd:,.0f}", className="metric-val",
+                         style={"fontSize": "16px"}),
+            ]),
+            html.Div(className="metric-box cyan", children=[
+                html.Div("CRITICAL SCENARIOS", className="metric-key"),
+                html.Div(f"{ns.critical_scenario_pct:.1f}%", className="metric-val"),
+            ]),
+            html.Div(className="metric-box teal", children=[
+                html.Div("TOP TRIGGER", className="metric-key"),
+                html.Div(top_trig[0][0] if top_trig else "—", className="metric-val"),
+            ]),
+        ])
+
+        # Serialise mc summary for PDF export
+        mc_store = json.dumps({
+            "n_scenarios":           ns.n_scenarios,
+            "mean_flights_affected": ns.mean_flights_affected,
+            "p50_flights_affected":  ns.p50_flights_affected,
+            "p90_flights_affected":  ns.p90_flights_affected,
+            "p99_flights_affected":  ns.p99_flights_affected,
+            "mean_cost_usd":         ns.mean_cost_usd,
+            "p50_cost_usd":          ns.p50_cost_usd,
+            "p90_cost_usd":          ns.p90_cost_usd,
+            "p99_cost_usd":          ns.p99_cost_usd,
+            "mean_total_delay":      ns.mean_total_delay,
+            "p90_total_delay":       ns.p90_total_delay,
+            "zero_cascade_pct":      ns.zero_cascade_pct,
+            "critical_scenario_pct": ns.critical_scenario_pct,
+            "top_triggers":          ns.top_triggers,
+            # risk profiles (serialisable subset)
+            "risk_profiles": {
+                fid: {
+                    "risk_label": p.risk_label,
+                    "risk_score": p.risk_score,
+                    "victim_probability": p.victim_probability,
+                    "trigger_avg_cost": p.trigger_avg_cost,
+                    "direction": p.direction,
+                    "origin": p.origin,
+                    "destination": p.destination,
+                    "aircraft_type": p.aircraft_type,
+                }
+                for fid, p in mc.risk_profiles.items()
+            },
+        })
+
+        return status, charts, stats, mc_store
+
+    # ── PDF export ─────────────────────────────────────────────────────────────
+    @app.callback(
+        Output("pdf-download", "data"),
+        Input("pdf-export-btn",   "n_clicks"),
+        State("cascade-result-store", "data"),
+        State("flight-select",   "value"),
+        State("delay-slider",    "value"),
+        State("mc-result-store", "data"),
+        prevent_initial_call=True
+    )
+    def export_pdf(n_clicks, cascade_store, flight_id, delay_min, mc_store):
+        if not n_clicks:
+            raise PreventUpdate
+
+        # Re-run cascade for current selection
+        if not flight_id or not delay_min:
+            raise PreventUpdate
+
+        result  = run_cascade(G, flight_id, float(delay_min))
+        options = evaluate_all_recovery_options(G, df, result)
+
+        cascade_dict = result.summary()
+        cascade_dict["events"] = [
+            {"flight_id": e.flight_id, "direction": "outbound",
+             "edge_type": e.edge_type, "delay_min": e.delay_min,
+             "pax_affected": e.pax_affected, "cost_usd": e.cost_usd,
+             "severity": e.severity}
+            for e in result.events
+        ]
+
+        opt_dicts = [
+            {"label": o.label, "feasible": o.feasible,
+             "delay_reduction_min": o.delay_reduction_min,
+             "delay_reduction_pct": o.delay_reduction_pct,
+             "direct_cost_usd": o.direct_cost_usd,
+             "net_cost_usd": o.net_cost_usd,
+             "pax_saved": o.pax_saved, "score": o.score}
+            for o in options
+        ]
+
+        # Re-run MC if no stored result (lightweight)
+        from engine.monte_carlo import run_monte_carlo, MonteCarloResult
+        mc = run_monte_carlo(G, df, n_scenarios=500)
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            path = tmp.name
+
+        generate_pdf_report(cascade_dict, opt_dicts, mc, path)
+
+        with open(path, "rb") as f:
+            pdf_bytes = f.read()
+        os.unlink(path)
+
+        filename = f"SILSILA_{flight_id}_{int(delay_min)}min_{result.flights_affected}affected.pdf"
+        return dcc.send_bytes(pdf_bytes, filename=filename)

@@ -59,7 +59,7 @@ def build_header() -> html.Div:
             html.Div(className="brand-title", children=[
                 html.Span("SIL"), "SILA"
             ]),
-            html.Div("HAMAD INTL · DOH/OTHH · PHASE 2", className="brand-sub"),
+            html.Div("HAMAD INTL · DOH/OTHH · PHASE 3", className="brand-sub"),
         ]),
         html.Div(className="header-indicators", children=[
             html.Div(className="indicator", children=[
@@ -261,6 +261,45 @@ def build_recovery_panel() -> html.Div:
     ])
 
 
+def build_monte_carlo_panel() -> html.Div:
+    """Phase 3: Monte Carlo risk panel with heatmap and distribution charts."""
+    return html.Div(className="mc-panel", id="mc-panel", children=[
+        html.Div(className="panel-header", children=[
+            html.Span("MONTE CARLO RISK ANALYSIS", className="panel-title"),
+            html.Div([
+                html.Span("PHASE 3", className="panel-badge", style={"marginRight": "6px"}),
+                html.Span("500 SCENARIOS", className="panel-badge",
+                          style={"marginRight": "6px"}),
+                html.Button(
+                    "▶  RUN MONTE CARLO",
+                    id="mc-run-btn",
+                    className="mc-run-btn",
+                    n_clicks=0,
+                ),
+                html.Button(
+                    "⬇  EXPORT PDF",
+                    id="pdf-export-btn",
+                    className="mc-export-btn",
+                    n_clicks=0,
+                ),
+                dcc.Download(id="pdf-download"),
+            ]),
+        ]),
+        # Progress / status bar
+        html.Div(id="mc-status-bar", className="mc-status-bar", children=[
+            html.Div(className="log-empty", style={"height": "60px"}, children=[
+                html.Div("◈", className="icon"),
+                html.Div("MONTE CARLO READY — click RUN to simulate 500 scenarios",
+                         style={"textTransform": "none", "letterSpacing": "0"}),
+            ])
+        ]),
+        # Charts row
+        html.Div(className="mc-charts-grid", id="mc-charts", children=[]),
+        # Network summary stats
+        html.Div(id="mc-network-stats", className="mc-network-stats"),
+    ])
+
+
 # ─── Root Layout ──────────────────────────────────────────────────────────────
 
 def build_layout(flight_options: list) -> html.Div:
@@ -273,9 +312,11 @@ def build_layout(flight_options: list) -> html.Div:
         ]),
         build_recovery_panel(),
         build_gantt_panel(),
+        build_monte_carlo_panel(),
 
-        # Hidden stores for state
+        # Hidden stores
         dcc.Store(id="cascade-result-store"),
         dcc.Store(id="schedule-store"),
         dcc.Store(id="selected-recovery-store"),
+        dcc.Store(id="mc-result-store"),
     ])

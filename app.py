@@ -16,7 +16,7 @@ import pandas as pd
 from engine.data_loader   import load_schedule
 from engine.graph_builder import build_graph, graph_summary, compute_node_positions
 from ui.layout            import build_layout
-from ui.callbacks         import register_callbacks
+from ui.callbacks         import register_callbacks, register_phase3_callbacks
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(
@@ -74,9 +74,10 @@ def main():
 
     # Register all callbacks (pass G, df, and cached positions into closure)
     register_callbacks(app, G, df, positions)
+    register_phase3_callbacks(app, G, df)
 
     logger.info("─" * 60)
-    logger.info("  SILSILA  ·  Phase 1")
+    logger.info("  SILSILA  ·  Phase 3  — CASCADE + RECOVERY + MONTE CARLO")
     logger.info("  http://localhost:8050")
     logger.info("─" * 60)
 

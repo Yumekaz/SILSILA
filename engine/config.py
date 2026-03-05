@@ -32,3 +32,15 @@ CANCEL_EU261_COST_PER_PAX     = 600.0   # EU261 Article 7 — medium-haul standa
 # DELAY (compress) heuristic
 COMPRESS_TURNAROUND_MINUTES = 38     # Absolute minimum Qatar can achieve under pressure
                                      # (below standard 45 min — requires ops approval)
+
+# ── Monte Carlo Constants (Phase 3) ────────────────────────────────────────────
+# Delay distribution parameters — lognormal, calibrated to EUROCONTROL 2024 data
+# EUROCONTROL: mean delay 17.5 min/flight, 46% of minutes are reactionary
+MC_SCENARIOS            = 500        # Number of Monte Carlo scenarios
+MC_DELAY_MU_LOG         = 2.85       # lognormal μ  → median initial delay ~17 min
+MC_DELAY_SIGMA_LOG       = 0.95       # lognormal σ  → fat right tail (extreme events)
+MC_DELAY_MIN_MIN        = 5.0        # Minimum sampled delay (minutes)
+MC_DELAY_MAX_MIN        = 300.0      # Cap at 5 hours (beyond = diversion/cancel)
+MC_RANDOM_SEED          = 42         # Reproducible runs
+MC_HIGH_RISK_THRESHOLD  = 0.35       # Flight is "high risk" if cascade probability > 35%
+MC_CRITICAL_COST_USD    = 50_000     # Scenario is "critical" if cascade cost > $50k
