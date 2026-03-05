@@ -61,7 +61,7 @@ def build_header() -> html.Div:
             html.Div(className="brand-title", children=[
                 html.Span("SIL"), "SILA"
             ]),
-            html.Div("HAMAD INTL · DOH/OTHH · PHASE 3", className="brand-sub"),
+            html.Div("HAMAD INTL · DOH/OTHH · OPS COMMAND", className="brand-sub"),
         ]),
         html.Div(className="header-indicators", children=[
             html.Div(className="indicator", children=[
@@ -94,7 +94,7 @@ def build_control_panel(flight_options: list) -> html.Div:
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("DISRUPTION INPUT", className="panel-title"),
-            html.Span("PHASE 1", className="panel-badge"),
+            html.Span("LIVE", className="panel-badge"),
         ]),
         html.Div(className="panel-body", children=[
 
@@ -248,7 +248,7 @@ def build_recovery_panel() -> html.Div:
         html.Div(className="panel-header", children=[
             html.Span("RECOVERY OPTIONS", className="panel-title"),
             html.Div([
-                html.Span("PHASE 2", className="panel-badge",
+                html.Span("RECOVERY", className="panel-badge",
                           style={"marginRight": "6px"}),
                 html.Span("AWAITING CASCADE", className="panel-badge",
                           id="recovery-status-badge"),
@@ -276,7 +276,7 @@ def build_monte_carlo_panel() -> html.Div:
         html.Div(className="panel-header", children=[
             html.Span("MONTE CARLO RISK ANALYSIS", className="panel-title"),
             html.Div([
-                html.Span("PHASE 3", className="panel-badge", style={"marginRight": "6px"}),
+                html.Span("RISK LAB", className="panel-badge", style={"marginRight": "6px"}),
                 html.Span(f"{MC_SCENARIOS} SCENARIOS", className="panel-badge",
                           style={"marginRight": "6px"}),
                 html.Button(

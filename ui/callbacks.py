@@ -51,19 +51,6 @@ def register_callbacks(app, G, df):
     # Pre-build stylesheet once — it doesn't change between cascades
     CYTO_STYLESHEET = build_cyto_stylesheet()
 
-    # ── Initialise graph on page load ──────────────────────────────────────────
-    @app.callback(
-        Output("network-graph", "elements"),
-        Output("network-graph", "stylesheet"),
-        Input("clock-interval", "n_intervals"),
-    )
-    def init_graph(n):
-        if n and n > 1:
-            from dash.exceptions import PreventUpdate
-            raise PreventUpdate
-        elements = build_cyto_elements(G, df, None, set())
-        return elements, CYTO_STYLESHEET
-
     # ── Live clock ─────────────────────────────────────────────────────────────
     @app.callback(
         Output("live-clock", "children"),
@@ -182,8 +169,8 @@ def register_callbacks(app, G, df):
         if triggered == "reset-btn":
             return (
                 None,
-                build_cyto_elements(G, df, None, set()),
-                CYTO_STYLESHEET,
+                [],
+                [],
                 _empty_log(),
                 "0 AFFECTED",
                 _build_gantt(df, None),
@@ -195,8 +182,8 @@ def register_callbacks(app, G, df):
         if not flight_id or not delay_min:
             return (
                 None,
-                build_cyto_elements(G, df, None, set()),
-                CYTO_STYLESHEET,
+                [],
+                [],
                 _empty_log(), "0 AFFECTED",
                 _build_gantt(df, None),
                 html.Div(),
@@ -262,15 +249,6 @@ def register_callbacks(app, G, df):
             build_cyto_elements(G, df_rec, flight_id, affected_ids),
             selected.strategy,
         )
-
-    # ── Highlight selected flight on dropdown change ───────────────────────────
-    @app.callback(
-        Output("network-graph", "elements", allow_duplicate=True),
-        Input("flight-select", "value"),
-        prevent_initial_call=True
-    )
-    def highlight_selected(flight_id):
-        return build_cyto_elements(G, df, flight_id, set())
 
     # ── Node click → show info in header ──────────────────────────────────────
     @app.callback(

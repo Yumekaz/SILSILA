@@ -1,7 +1,7 @@
 """
 app.py
 ------
-SILSILA — Phase 3 + Cytoscape network graph
+SILSILA — Cytoscape network graph dashboard
 Run:  python app.py
 Open: http://localhost:8050
 """
@@ -78,11 +78,17 @@ def main():
     register_phase3_callbacks(app, G, df)
 
     logger.info("─" * 60)
-    logger.info("  SILSILA  ·  Phase 3 + Cytoscape")
+    logger.info("  SILSILA  ·  Cytoscape Ops Dashboard")
     logger.info("  http://localhost:8050")
     logger.info("─" * 60)
 
-    app.run(debug=True, host="0.0.0.0", port=8050)
+    app.run(
+        debug=False,
+        dev_tools_ui=False,
+        dev_tools_hot_reload=False,
+        host="0.0.0.0",
+        port=8050,
+    )
 
 
 if __name__ == "__main__":

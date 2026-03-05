@@ -41,7 +41,10 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  background-color: var(--bg-0);
+  background:
+    radial-gradient(1200px 480px at 15% -20%, rgba(0, 200, 255, 0.09), transparent 65%),
+    radial-gradient(1000px 420px at 85% -30%, rgba(232, 160, 32, 0.08), transparent 70%),
+    linear-gradient(180deg, #04070d 0%, #050912 45%, #05080f 100%);
   color: var(--text-1);
   font-family: var(--font-body);
   font-size: 13px;
@@ -56,9 +59,11 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  height: 56px;
-  background: var(--bg-1);
+  min-height: 64px;
+  background: linear-gradient(180deg, rgba(12, 18, 32, 0.96) 0%, rgba(10, 15, 26, 0.9) 100%);
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -87,7 +92,7 @@ body {
   font-family: var(--font-data);
   font-size: 11px;
   color: var(--text-3);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.16em;
 }
 
 .header-indicators {
@@ -138,21 +143,29 @@ body {
   display: grid;
   grid-template-columns: 280px 1fr 320px;
   grid-template-rows: 1fr;
-  height: calc(100vh - 56px - 260px);
+  height: calc(100vh - 64px - 260px);
   min-height: 420px;
-  gap: 1px;
-  background: var(--border);
+  gap: 12px;
+  padding: 12px;
+  background: transparent;
 }
 
 .bottom-panel {
+  margin: 0 12px 12px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
   height: 260px;
-  background: var(--bg-1);
-  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(12,18,32,0.95) 0%, rgba(9,14,24,0.95) 100%);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
 /* ── Panel Base ──────────────────────────────────────────────── */
 .panel {
-  background: var(--bg-1);
+  background: linear-gradient(180deg, rgba(12,18,32,0.96) 0%, rgba(9,14,24,0.96) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -162,9 +175,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 11px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(23,32,57,0.45) 0%, rgba(17,27,48,0.25) 100%);
 }
 
 .panel-title {
@@ -173,7 +187,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--text-3);
+  color: #95abcf;
 }
 
 .panel-badge {
@@ -181,9 +195,10 @@ body {
   font-size: 10px;
   padding: 2px 8px;
   border-radius: var(--radius);
-  background: var(--bg-3);
+  background: rgba(23, 32, 57, 0.75);
   color: var(--text-2);
   border: 1px solid var(--border);
+  letter-spacing: 0.08em;
 }
 
 .panel-body {
@@ -215,6 +230,7 @@ body {
   border: 1px solid var(--border) !important;
   border-radius: var(--radius) !important;
   color: var(--text-1) !important;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
 }
 
 .Select-value-label, .Select-placeholder {
@@ -236,6 +252,7 @@ body {
 }
 
 .Select-arrow { border-color: var(--text-3) transparent transparent !important; }
+.Select-control:hover { border-color: #2b456d !important; }
 
 /* Delay Slider */
 .rc-slider-track  { background: var(--gold) !important; }
@@ -273,14 +290,16 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.18s ease;
   margin-top: 8px;
+  box-shadow: inset 0 0 0 1px rgba(232, 160, 32, 0.12);
 }
 
 .trigger-btn:hover {
   background: var(--gold);
   color: var(--bg-0);
-  box-shadow: 0 0 20px rgba(232, 160, 32, 0.35);
+  box-shadow: 0 10px 22px rgba(232, 160, 32, 0.26);
+  transform: translateY(-1px);
 }
 
 .trigger-btn:active { transform: scale(0.98); }
@@ -302,7 +321,11 @@ body {
   margin-top: 6px;
 }
 
-.reset-btn:hover { border-color: var(--text-2); color: var(--text-2); }
+.reset-btn:hover {
+  border-color: var(--text-2);
+  color: var(--text-2);
+  background: rgba(140, 160, 192, 0.08);
+}
 
 /* Flight Info Card */
 .flight-card {
@@ -311,6 +334,7 @@ body {
   border-radius: var(--radius);
   padding: 12px;
   margin-top: 12px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
 }
 
 .flight-card-route {
@@ -464,6 +488,9 @@ body {
 .graph-container {
   flex: 1;
   position: relative;
+  background:
+    linear-gradient(0deg, rgba(6,9,15,0.95), rgba(6,9,15,0.95)),
+    radial-gradient(700px 250px at 50% 0%, rgba(0,200,255,0.08), transparent 70%);
 }
 
 /* ── Gantt ───────────────────────────────────────────────────── */
@@ -505,10 +532,13 @@ body {
 
 /* ── Recovery Panel Container ────────────────────────────────── */
 .recovery-panel {
-  background: var(--bg-1);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  margin: 0 12px 12px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(12,18,32,0.95) 0%, rgba(9,14,24,0.95) 100%);
+  border: 1px solid var(--border);
   min-height: 220px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
 .recovery-cards-empty {
@@ -522,23 +552,29 @@ body {
 .recovery-cards-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  background: var(--border);
-  padding: 0;
+  gap: 10px;
+  background: transparent;
+  padding: 10px;
 }
 
 /* ── Single Recovery Card ────────────────────────────────────── */
 .recovery-card {
   background: var(--bg-1);
   padding: 16px 18px;
+  border: 1px solid var(--border);
   border-top: 2px solid transparent;
-  transition: background 0.15s;
+  border-radius: var(--radius);
+  transition: background 0.15s, transform 0.15s, border-color 0.15s;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.recovery-card:hover { background: var(--bg-2); }
+.recovery-card:hover {
+  background: var(--bg-2);
+  border-color: #2a4368;
+  transform: translateY(-1px);
+}
 
 .recovery-card-infeasible {
   background: var(--bg-1);
@@ -704,8 +740,12 @@ body {
 ═══════════════════════════════════════════════════════════════ */
 
 .mc-panel {
-  background: var(--bg-1);
-  border-top: 1px solid var(--border);
+  margin: 0 12px 12px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(12,18,32,0.95) 0%, rgba(9,14,24,0.95) 100%);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
 /* Header buttons */
@@ -727,7 +767,8 @@ body {
 .mc-run-btn:hover {
   background: var(--teal);
   color: var(--bg-0);
-  box-shadow: 0 0 14px rgba(0,212,160,0.3);
+  box-shadow: 0 8px 18px rgba(0,212,160,0.25);
+  transform: translateY(-1px);
 }
 
 .mc-export-btn {
@@ -747,6 +788,7 @@ body {
 .mc-export-btn:hover {
   border-color: var(--gold);
   color: var(--gold);
+  background: rgba(232, 160, 32, 0.06);
 }
 
 /* Status bar */
@@ -768,13 +810,16 @@ body {
 .mc-charts-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1.6fr;
-  gap: 1px;
-  background: var(--border);
+  gap: 10px;
+  background: transparent;
+  padding: 10px;
   border-top: 1px solid var(--border);
 }
 
 .mc-chart-cell {
   background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: 4px 8px 0;
 }
 
@@ -782,15 +827,15 @@ body {
 .mc-stats-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 1px;
-  background: var(--border);
+  gap: 10px;
+  background: transparent;
+  padding: 10px;
   border-top: 1px solid var(--border);
 }
 
 .mc-stats-row .metric-box {
-  border-radius: 0;
-  border: none;
-  border-top: none;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
   padding: 12px 18px;
 }
 
@@ -856,16 +901,24 @@ button:disabled {
 
   .main-grid {
     display: block;
+    padding: 8px;
+    gap: 0;
   }
 
   .panel {
     min-height: 260px;
-    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
   }
 
   .bottom-panel {
+    margin: 0 8px 8px;
     height: auto;
     min-height: 220px;
+  }
+
+  .recovery-panel,
+  .mc-panel {
+    margin: 0 8px 8px;
   }
 
   .gantt-container {
