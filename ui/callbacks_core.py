@@ -13,7 +13,13 @@ import plotly.graph_objects as go
 import pandas as pd
 
 from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
-from ui.session_state import serialize_cascade_result, serialize_recovery_options
+from dash.exceptions import PreventUpdate
+
+from ui.session_state import (
+    cascade_store_matches_request,
+    serialize_cascade_result,
+    serialize_recovery_options,
+)
 from ui.workflows import run_simulation_bundle, select_recovery_option
 
 COLORS = {
@@ -44,6 +50,7 @@ COLORS = {
 def register_callbacks(app, G, df):
     """Register live simulation and recovery callbacks."""
     cyto_stylesheet = build_cyto_stylesheet()
+    base_elements = build_cyto_elements(G, df)
     COLORS["recovered"] = "#1A7A4A"
     COLORS["cancelled"] = "#4A1A2A"
 
@@ -157,8 +164,8 @@ def register_callbacks(app, G, df):
         if triggered == "reset-btn":
             return (
                 None,
-                [],
-                [],
+                base_elements,
+                cyto_stylesheet,
                 _empty_log(),
                 "0 AFFECTED",
                 _build_gantt(df, None),
@@ -173,8 +180,8 @@ def register_callbacks(app, G, df):
         if not flight_id or not delay_min:
             return (
                 None,
-                [],
-                [],
+                base_elements,
+                cyto_stylesheet,
                 _empty_log(),
                 "0 AFFECTED",
                 _build_gantt(df, None),
@@ -204,6 +211,44 @@ def register_callbacks(app, G, df):
         )
 
     @app.callback(
+        Output("cascade-result-store", "data", allow_duplicate=True),
+        Output("network-graph", "elements", allow_duplicate=True),
+        Output("network-graph", "stylesheet", allow_duplicate=True),
+        Output("cascade-log", "children", allow_duplicate=True),
+        Output("affected-count", "children", allow_duplicate=True),
+        Output("gantt-chart", "figure", allow_duplicate=True),
+        Output("summary-metrics", "children", allow_duplicate=True),
+        Output("recovery-cards", "children", allow_duplicate=True),
+        Output("recovery-status-badge", "children", allow_duplicate=True),
+        Output("optimizer-summary", "children", allow_duplicate=True),
+        Output("recovery-options-store", "data", allow_duplicate=True),
+        Output("selected-recovery-store", "data", allow_duplicate=True),
+        Input("flight-select", "value"),
+        Input("delay-slider", "value"),
+        State("cascade-result-store", "data"),
+        prevent_initial_call=True,
+    )
+    def invalidate_stale_scenario(flight_id, delay_min, cascade_store):
+        if not cascade_store:
+            raise PreventUpdate
+        if cascade_store_matches_request(cascade_store, flight_id, delay_min):
+            raise PreventUpdate
+        return (
+            None,
+            base_elements,
+            cyto_stylesheet,
+            _empty_log(),
+            "0 AFFECTED",
+            _build_gantt(df, None),
+            html.Div(),
+            _empty_recovery_cards(),
+            "AWAITING CASCADE",
+            html.Div(),
+            None,
+            None,
+        )
+
+    @app.callback(
         Output("gantt-chart", "figure", allow_duplicate=True),
         Output("network-graph", "elements", allow_duplicate=True),
         Output("selected-recovery-store", "data"),
@@ -211,14 +256,17 @@ def register_callbacks(app, G, df):
         Input({"type": "recovery-select-btn", "index": 1}, "n_clicks"),
         Input({"type": "recovery-select-btn", "index": 2}, "n_clicks"),
         State("flight-select", "value"),
+        State("delay-slider", "value"),
         State("recovery-options-store", "data"),
+        State("cascade-result-store", "data"),
         prevent_initial_call=True,
     )
-    def apply_recovery(c0, c1, c2, flight_id, recovery_store):
+    def apply_recovery(c0, c1, c2, flight_id, delay_min, recovery_store, cascade_store):
         from dash import ctx
-        from dash.exceptions import PreventUpdate
 
         if not ctx.triggered_id or not flight_id or not recovery_store:
+            raise PreventUpdate
+        if not cascade_store_matches_request(cascade_store, flight_id, delay_min):
             raise PreventUpdate
 
         triggered_idx = ctx.triggered_id.get("index", 0)
@@ -265,7 +313,7 @@ def _build_cascade_log(result) -> list:
                 html.Div(className="cascade-item-top", children=[
                     html.Span([
                         event.flight_id,
-                        html.Span(event.edge_type, className=f"ci-type-tag {event.edge_type}"),
+                        html.Span(" / ".join(getattr(event, "impact_channels", [event.edge_type])), className=f"ci-type-tag {event.edge_type}"),
                     ], className="ci-flight"),
                     html.Span(f"+{event.delay_min:.0f} min", className=f"ci-delay {event.severity}"),
                 ]),

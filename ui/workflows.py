@@ -13,6 +13,7 @@ from engine.cascade import cascaded_schedule, run_cascade
 from engine.optimizer import optimize_recovery_options
 from engine.recovery import evaluate_all_recovery_options
 from ui.session_state import (
+    cascade_store_matches_request,
     deserialize_cascade_store,
     deserialize_recovery_option_frame,
     deserialize_recovery_store,
@@ -102,6 +103,13 @@ def prepare_pdf_export_bundle(
     recovery_payload = deserialize_recovery_store(recovery_store)
 
     bundle = None
+    stores_match_request = cascade_store_matches_request(cascade_store, flight_id, delay_min)
+    has_stored_scenario = bool(cascade_store or recovery_store)
+    if has_stored_scenario and not stores_match_request:
+        selected_strategy = None
+        cascade_payload = None
+        recovery_payload = []
+
     if cascade_payload is None or not recovery_payload:
         bundle = run_simulation_bundle(graph, df, flight_id, delay_min)
 

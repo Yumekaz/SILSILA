@@ -164,7 +164,7 @@ def build_control_panel(flight_options: list) -> html.Div:
 
 # ─── Center: Network Graph ────────────────────────────────────────────────────
 
-def build_network_panel() -> html.Div:
+def build_network_panel(initial_elements: list | None = None, initial_stylesheet: list | None = None) -> html.Div:
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("DOH HUB DEPENDENCY GRAPH", className="panel-title"),
@@ -191,8 +191,8 @@ def build_network_panel() -> html.Div:
                 layout={"name": "preset"},
                 style={"height": "100%", "width": "100%",
                        "background": "#06090F"},
-                elements=[],
-                stylesheet=[],   # populated by callback
+                elements=initial_elements or [],
+                stylesheet=initial_stylesheet or [],
                 userZoomingEnabled=True,
                 userPanningEnabled=True,
                 minZoom=0.2,
@@ -348,12 +348,17 @@ def build_sensitivity_panel() -> html.Div:
 
 # ─── Root Layout ──────────────────────────────────────────────────────────────
 
-def build_layout(flight_options: list, data_source_label: str) -> html.Div:
+def build_layout(
+    flight_options: list,
+    data_source_label: str,
+    initial_graph_elements: list | None = None,
+    initial_graph_stylesheet: list | None = None,
+) -> html.Div:
     return html.Div([
         build_header(data_source_label),
         html.Div(className="main-grid", children=[
             build_control_panel(flight_options),
-            build_network_panel(),
+            build_network_panel(initial_graph_elements, initial_graph_stylesheet),
             build_cascade_log_panel(),
         ]),
         build_recovery_panel(),

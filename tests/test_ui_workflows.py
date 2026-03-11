@@ -13,8 +13,14 @@ from engine.graph_builder import build_graph
 from engine.recovery import evaluate_all_recovery_options
 from ui.analysis_views import build_monte_carlo_outputs, build_sensitivity_outputs
 from ui.callbacks_core import COLORS
-from ui.session_state import deserialize_mc_store, serialize_mc_result, serialize_recovery_options
-from ui.workflows import prepare_pdf_export_bundle, select_recovery_option
+from ui.session_state import (
+    cascade_store_matches_request,
+    deserialize_mc_store,
+    serialize_cascade_result,
+    serialize_mc_result,
+    serialize_recovery_options,
+)
+from ui.workflows import prepare_pdf_export_bundle, run_simulation_bundle, select_recovery_option
 
 
 @pytest.fixture(scope="module")
@@ -188,3 +194,31 @@ def test_build_sensitivity_outputs_returns_dual_axis_figure():
     assert summary is not None
     assert len(figure.data) == 2
     assert "TURNAROUND SENSITIVITY" in figure.layout.title.text
+
+
+def test_prepare_pdf_export_bundle_recomputes_stale_scenario_stores(schedule_df, dependency_graph):
+    old_bundle = run_simulation_bundle(dependency_graph, schedule_df, "QR007", 30.0)
+    stale_cascade_store = serialize_cascade_result(old_bundle.cascade_result, dependency_graph)
+    stale_recovery_store = serialize_recovery_options(old_bundle.recovery_options)
+
+    bundle = prepare_pdf_export_bundle(
+        dependency_graph,
+        schedule_df,
+        "QR021",
+        60.0,
+        stale_cascade_store,
+        stale_recovery_store,
+        None,
+    )
+
+    assert bundle.cascade_payload["trigger"] == "QR021"
+    assert bundle.cascade_payload["trigger_delay_min"] == 60.0
+
+
+def test_cascade_store_match_helper_detects_stale_controls(schedule_df, dependency_graph):
+    bundle = run_simulation_bundle(dependency_graph, schedule_df, "QR007", 30.0)
+    cascade_store = serialize_cascade_result(bundle.cascade_result, dependency_graph)
+
+    assert cascade_store_matches_request(cascade_store, "QR007", 30.0)
+    assert not cascade_store_matches_request(cascade_store, "QR021", 30.0)
+    assert not cascade_store_matches_request(cascade_store, "QR007", 60.0)

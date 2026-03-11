@@ -45,6 +45,7 @@ class CascadeEvent:
     pax_stranded:    int = 0       # pax who miss connection (PAX_CNXN only)
     cost_usd:        float = 0.0
     severity:        str = "LOW"   # LOW / MEDIUM / HIGH / CRITICAL
+    impact_channels: list = field(default_factory=list)
 
     def severity_label(self) -> str:
         if self.delay_min >= 120:  return "CRITICAL"
@@ -176,12 +177,21 @@ def run_cascade(
         for neighbor_id in G.successors(current_id):
             edge_data = G.edges[current_id, neighbor_id]
             propagated_delay, stranded_pax = _propagated_delay(current_delay, edge_data)
+            edge_type = edge_data.get("edge_type", "ROTATION")
 
             # Only process if this route produces a meaningful delay
             if propagated_delay < 1.0 and stranded_pax == 0:
                 continue
 
-            # If we've seen this node before, only re-process if delay is worse
+            prev = events_by_flight.get(neighbor_id)
+            if prev is not None:
+                prev.impact_channels = sorted(set(prev.impact_channels) | {edge_type})
+                if stranded_pax > 0:
+                    prev.pax_stranded += stranded_pax
+
+            # If we've seen this node before, only re-process if delay is worse.
+            # We still merge secondary impact channels above so multi-path
+            # passenger and dependency effects are not silently lost.
             if neighbor_id in visited and visited[neighbor_id] >= propagated_delay:
                 continue
 
@@ -199,18 +209,21 @@ def run_cascade(
             event = CascadeEvent(
                 flight_id=neighbor_id,
                 delay_min=round(propagated_delay, 1),
-                edge_type=edge_data.get("edge_type", "ROTATION"),
+                edge_type=edge_type,
                 caused_by=current_id,
                 propagation_path=path + [neighbor_id],
                 pax_affected=pax,
                 pax_stranded=stranded_pax,
                 cost_usd=round(cost, 2),
+                impact_channels=[edge_type],
             )
             event.severity = event.severity_label()
 
             # Keep one event per affected flight, retaining worst-case propagated delay.
-            prev = events_by_flight.get(neighbor_id)
             if prev is None or event.delay_min >= prev.delay_min:
+                if prev is not None:
+                    event.pax_stranded += prev.pax_stranded
+                    event.impact_channels = sorted(set(prev.impact_channels) | set(event.impact_channels))
                 events_by_flight[neighbor_id] = event
 
             result.max_depth          = max(result.max_depth, depth + 1)

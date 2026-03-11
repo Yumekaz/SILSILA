@@ -35,6 +35,7 @@ def serialize_cascade_result(result, graph) -> str:
             "severity": event.severity,
             "caused_by": event.caused_by,
             "propagation_path": event.propagation_path,
+            "impact_channels": list(getattr(event, "impact_channels", [event.edge_type])),
         }
         for event in result.events
     ]
@@ -50,6 +51,19 @@ def deserialize_cascade_store(cascade_store: str | None) -> dict | None:
     except (TypeError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def cascade_store_matches_request(cascade_store: str | None, flight_id: str | None, delay_min: float | None) -> bool:
+    """Return True when a stored cascade payload still matches the active controls."""
+    payload = deserialize_cascade_store(cascade_store)
+    if payload is None or not flight_id or delay_min is None:
+        return False
+    stored_trigger = payload.get("trigger")
+    stored_delay = payload.get("trigger_delay_min")
+    try:
+        return stored_trigger == flight_id and float(stored_delay) == float(delay_min)
+    except (TypeError, ValueError):
+        return False
 
 
 def serialize_recovery_options(options) -> str:
@@ -87,6 +101,7 @@ def serialize_recovery_options(options) -> str:
                     "pax_stranded": event.pax_stranded,
                     "cost_usd": event.cost_usd,
                     "severity": event.severity,
+                    "impact_channels": list(getattr(event, "impact_channels", [event.edge_type])),
                 }
                 for event in option.residual_events
             ],
