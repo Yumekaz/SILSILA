@@ -27,7 +27,6 @@ from engine.config import (
     OTHH,
     OPENSKY_URL,
     MIN_TURNAROUND_MINUTES,
-    CREW_MIN_REST_MINUTES
 )
 
 # Real Qatar Airways fleet sample (tail → aircraft type → seats)
@@ -76,6 +75,7 @@ REQUIRED_COLUMNS = {
     "dep_delay_min",
     "status",
     "block_time_h",
+    "turnaround_slack_min",
 }
 
 
@@ -141,6 +141,57 @@ def _schedule_is_usable(df: pd.DataFrame) -> bool:
     has_inbound = (df["direction"] == "inbound").any()
     has_outbound = (df["direction"] == "outbound").any()
     return bool(has_inbound and has_outbound)
+
+
+def _apply_turnaround_slack(df: pd.DataFrame) -> pd.DataFrame:
+    """Recompute turnaround slack for each modeled aircraft rotation pair."""
+    df["turnaround_slack_min"] = 0.0
+
+    inbound = df[df["direction"] == "inbound"].dropna(subset=["arr_actual"]).set_index("aircraft_reg")
+    outbound = df[df["direction"] == "outbound"].dropna(subset=["dep_scheduled"]).set_index("aircraft_reg")
+
+    for reg in inbound.index.intersection(outbound.index):
+        arr = inbound.loc[reg, "arr_actual"]
+        dep = outbound.loc[reg, "dep_scheduled"]
+        slack = (dep - arr).total_seconds() / 60 - MIN_TURNAROUND_MINUTES
+        df.loc[df["aircraft_reg"] == reg, "turnaround_slack_min"] = round(slack, 1)
+
+    df["turnaround_slack_min"] = df["turnaround_slack_min"].fillna(0.0)
+    return df
+
+
+def _build_hybrid_schedule(opensky_df: pd.DataFrame, base_date: datetime) -> pd.DataFrame:
+    """
+    Blend real OpenSky arrivals into the modeled hub schedule so the simulator
+    remains internally consistent while preserving observed arrival timing.
+    """
+    hybrid = build_synthetic_schedule(base_date).copy()
+    real_inbound = (
+        opensky_df[opensky_df["direction"] == "inbound"]
+        .dropna(subset=["arr_actual"])
+        .sort_values(["arr_actual", "flight_id"])
+        .reset_index(drop=True)
+    )
+    hybrid_inbound_idx = list(hybrid.index[hybrid["direction"] == "inbound"])
+
+    if not hybrid_inbound_idx or real_inbound.empty:
+        return hybrid
+
+    assigned = min(len(hybrid_inbound_idx), len(real_inbound))
+    for pos in range(assigned):
+        idx = hybrid_inbound_idx[pos]
+        real_row = real_inbound.iloc[pos]
+        hybrid.loc[idx, "flight_id"] = real_row["flight_id"]
+        hybrid.loc[idx, "origin"] = real_row["origin"]
+        hybrid.loc[idx, "destination"] = OTHH
+        hybrid.loc[idx, "arr_scheduled"] = real_row["arr_scheduled"]
+        hybrid.loc[idx, "arr_actual"] = real_row["arr_actual"]
+        hybrid.loc[idx, "arr_delay_min"] = real_row["arr_delay_min"]
+        hybrid.loc[idx, "status"] = "landed"
+
+    hybrid = _apply_turnaround_slack(hybrid)
+    hybrid.attrs["data_source"] = f"opensky-hybrid-{assigned}-arrivals"
+    return hybrid
 
 
 def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
@@ -314,19 +365,7 @@ def build_synthetic_schedule(base_date: datetime | None = None) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
 
-    # Build rotation pairs: each inbound aircraft → its outbound rotation
-    # turnaround_slack = dep_scheduled - arr_actual - MIN_TURNAROUND
-    inb = df[df["direction"] == "inbound"].set_index("aircraft_reg")
-    oub = df[df["direction"] == "outbound"].set_index("aircraft_reg")
-
-    for reg in inb.index:
-        if reg in oub.index:
-            arr = inb.loc[reg, "arr_actual"]
-            dep = oub.loc[reg, "dep_scheduled"]
-            slack = (dep - arr).total_seconds() / 60 - MIN_TURNAROUND_MINUTES
-            df.loc[df["aircraft_reg"] == reg, "turnaround_slack_min"] = round(slack, 1)
-
-    df["turnaround_slack_min"] = df.get("turnaround_slack_min", pd.Series(dtype=float)).fillna(0)
+    df = _apply_turnaround_slack(df)
     df = df.reset_index(drop=True)
     df.attrs["data_source"] = "synthetic-hub-schedule"
     return df
@@ -342,14 +381,23 @@ def load_schedule(date: datetime | None = None, use_opensky: bool = True) -> pd.
 
     if use_opensky:
         df = fetch_from_opensky(date)
-        if df is not None and len(df) > 5 and _schedule_is_usable(df):
-            logger.info("Loaded %d flights from OpenSky.", len(df))
-            df.attrs["data_source"] = df.attrs.get("data_source", "opensky")
-            return df
+        if df is not None and len(df) > 5:
+            if _schedule_is_usable(df):
+                logger.info("Loaded %d flights from OpenSky.", len(df))
+                df.attrs["data_source"] = df.attrs.get("data_source", "opensky")
+                return df
+
+            hybrid = _build_hybrid_schedule(df, date)
+            if _schedule_is_usable(hybrid):
+                logger.info(
+                    "Blended %d OpenSky arrivals into the modeled hub schedule.",
+                    int((df["direction"] == "inbound").sum()),
+                )
+                return hybrid
+
         if df is not None and len(df) > 0:
             logger.info(
-                "OpenSky payload incomplete for cascade model (arrivals-only or missing fields). "
-                "Using synthetic schedule."
+                "OpenSky payload incomplete for a hybrid schedule. Using synthetic schedule."
             )
         else:
             logger.info("Using synthetic schedule.")

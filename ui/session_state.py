@@ -94,7 +94,7 @@ def deserialize_mc_store(mc_store: str | None):
 
     risk_profiles = {}
     for fid, profile in payload.get("risk_profiles", {}).items():
-        risk_profiles[fid] = SimpleNamespace(**profile)
+        risk_profiles[fid] = SimpleNamespace(**({"trigger_avg_cascade": 0.0, **profile}))
 
     summary = SimpleNamespace(
         n_scenarios=payload.get("n_scenarios", 0),
@@ -121,3 +121,4 @@ def deserialize_mc_store(mc_store: str | None):
         cost_samples=[],
         n_scenarios=int(payload.get("n_scenarios", 0)),
     )
+

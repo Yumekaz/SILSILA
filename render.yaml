@@ -3,4 +3,4 @@ services:
     name: silsila-doha-cascade
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:server
+    startCommand: gunicorn server:server

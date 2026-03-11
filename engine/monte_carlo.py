@@ -369,7 +369,7 @@ def build_heatmap_data(mc_result: MonteCarloResult, G: nx.DiGraph) -> dict:
     """
     flight_ids = sorted(G.nodes())
     metrics    = [
-        "Trigger Risk",
+        "Avg Flights Hit",
         "Victim Probability",
         "Avg Cascade Cost",
         "Combined Risk",
@@ -381,10 +381,10 @@ def build_heatmap_data(mc_result: MonteCarloResult, G: nx.DiGraph) -> dict:
     z      = []
     annots = []
 
-    # Row 0: Trigger risk (normalised trigger_avg_cost)
-    max_trig = max((rp[f].trigger_avg_cost for f in flight_ids if f in rp), default=1) or 1
-    row_trig = [round(rp[f].trigger_avg_cost / max_trig, 3) if f in rp else 0 for f in flight_ids]
-    ann_trig = [f"${rp[f].trigger_avg_cost:,.0f}" if f in rp else "—" for f in flight_ids]
+    # Row 0: Avg flights affected when the flight is the trigger.
+    max_trig = max((rp[f].trigger_avg_cascade for f in flight_ids if f in rp), default=1) or 1
+    row_trig = [round(rp[f].trigger_avg_cascade / max_trig, 3) if f in rp else 0 for f in flight_ids]
+    ann_trig = [f"{rp[f].trigger_avg_cascade:.1f} flights" if f in rp else "—" for f in flight_ids]
     z.append(row_trig);  annots.append(ann_trig)
 
     # Row 1: Victim probability (already 0-1)
@@ -393,8 +393,9 @@ def build_heatmap_data(mc_result: MonteCarloResult, G: nx.DiGraph) -> dict:
     z.append(row_vic);   annots.append(ann_vic)
 
     # Row 2: Avg cascade cost triggered (normalised)
-    row_cost = row_trig  # same underlying metric
-    ann_cost = ann_trig
+    max_cost = max((rp[f].trigger_avg_cost for f in flight_ids if f in rp), default=1) or 1
+    row_cost = [round(rp[f].trigger_avg_cost / max_cost, 3) if f in rp else 0 for f in flight_ids]
+    ann_cost = [f"${rp[f].trigger_avg_cost:,.0f}" if f in rp else "—" for f in flight_ids]
     z.append(row_cost);  annots.append(ann_cost)
 
     # Row 3: Combined risk score

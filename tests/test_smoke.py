@@ -2,18 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
+import networkx as nx
 import pandas as pd
 import pytest
 
+import engine.data_loader as data_loader
 from app import build_flight_options
+from engine.cascade import cascaded_schedule, run_cascade
 from engine.data_loader import REQUIRED_COLUMNS, load_schedule
 from engine.graph_builder import build_graph, graph_summary
-from engine.cascade import run_cascade, cascaded_schedule
-from engine.recovery import evaluate_all_recovery_options
-from engine.monte_carlo import run_monte_carlo, build_heatmap_data
+from engine.monte_carlo import build_heatmap_data, run_monte_carlo
 from engine.optimizer import optimize_recovery_options
 from engine.pdf_report import generate_pdf_report
+from engine.recovery import evaluate_all_recovery_options
 from engine.sensitivity import run_turnaround_sensitivity
 from engine.validation import validate_graph, validate_schedule
 from ui.session_state import (
@@ -23,8 +26,6 @@ from ui.session_state import (
     serialize_cascade_result,
     serialize_recovery_options,
 )
-
-
 @pytest.fixture(scope="module")
 def schedule_df():
     return load_schedule(datetime.now(timezone.utc), use_opensky=False)
@@ -317,3 +318,54 @@ def test_turnaround_sensitivity_returns_ordered_scenarios(schedule_df):
     assert [point.min_turnaround_min for point in points] == [35.0, 45.0, 55.0]
     assert all(point.scenario_count == 2 for point in points)
     assert points[-1].mean_flights_affected >= points[0].mean_flights_affected
+
+
+def test_load_schedule_blends_partial_opensky_with_synthetic_network(monkeypatch):
+    date = datetime(2026, 3, 11, tzinfo=timezone.utc)
+    partial = load_schedule(date, use_opensky=False)
+    partial = partial[partial["direction"] == "inbound"].head(6).copy()
+    partial["flight_id"] = [f"QTR9{idx:02d}" for idx in range(len(partial))]
+    partial["origin"] = [f"ORIG{idx}" for idx in range(len(partial))]
+    partial.attrs["data_source"] = "opensky-arrivals-partial"
+
+    monkeypatch.setattr(data_loader, "fetch_from_opensky", lambda _: partial)
+
+    blended = load_schedule(date, use_opensky=True)
+
+    assert blended.attrs["data_source"].startswith("opensky-hybrid-")
+    assert (blended["direction"] == "inbound").any()
+    assert (blended["direction"] == "outbound").any()
+    assert set(partial["flight_id"]).issubset(set(blended["flight_id"]))
+    assert REQUIRED_COLUMNS.issubset(blended.columns)
+
+
+def test_heatmap_rows_use_distinct_trigger_and_cost_metrics():
+    graph = nx.DiGraph()
+    graph.add_node("QR001")
+    graph.add_node("QR002")
+
+    mc = SimpleNamespace(
+        risk_profiles={
+            "QR001": SimpleNamespace(
+                trigger_avg_cascade=4.0,
+                victim_probability=0.25,
+                trigger_avg_cost=8000.0,
+                risk_score=0.40,
+                risk_label="HIGH",
+            ),
+            "QR002": SimpleNamespace(
+                trigger_avg_cascade=1.0,
+                victim_probability=0.10,
+                trigger_avg_cost=1000.0,
+                risk_score=0.15,
+                risk_label="MEDIUM",
+            ),
+        }
+    )
+
+    heatmap = build_heatmap_data(mc, graph)
+
+    assert heatmap["y"][0] == "Avg Flights Hit"
+    assert heatmap["annots"][0][0].endswith("flights")
+    assert heatmap["annots"][2][0].startswith("$")
+    assert heatmap["z"][0] != heatmap["z"][2]

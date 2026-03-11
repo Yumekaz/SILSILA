@@ -216,6 +216,7 @@ def register_phase3_callbacks(app, G, df):
                     "risk_label": profile.risk_label,
                     "risk_score": profile.risk_score,
                     "victim_probability": profile.victim_probability,
+                    "trigger_avg_cascade": profile.trigger_avg_cascade,
                     "trigger_avg_cost": profile.trigger_avg_cost,
                     "direction": profile.direction,
                     "origin": profile.origin,

@@ -14,11 +14,11 @@ import dash
 import dash_cytoscape as cyto
 import pandas as pd
 
-from engine.data_loader   import load_schedule
+from engine.config import USE_OPENSKY_BY_DEFAULT
+from engine.data_loader import load_schedule
 from engine.graph_builder import build_graph, graph_summary
-from engine.config        import USE_OPENSKY_BY_DEFAULT
-from ui.layout            import build_layout
-from ui.callbacks         import register_callbacks, register_phase3_callbacks
+from ui.callbacks import register_callbacks, register_phase3_callbacks
+from ui.layout import build_layout
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(
@@ -38,17 +38,16 @@ def build_flight_options(df: pd.DataFrame, inbound_only: bool = True) -> list[di
     source_df = df[df["direction"] == "inbound"] if inbound_only else df
     for _, row in source_df.sort_values("flight_id").iterrows():
         direction = "↓ IN" if row["direction"] == "inbound" else "↑ OUT"
-        origin    = row["origin"]
-        dest      = row["destination"]
-        ref_time  = (row["arr_actual"] if row["direction"] == "inbound"
-                     else row["dep_scheduled"])
-        time_str  = ref_time.strftime("%H:%M") if pd.notna(ref_time) else "--:--"
-        label     = f"{row['flight_id']}  {direction}  {origin}→{dest}  {time_str}"
+        origin = row["origin"]
+        dest = row["destination"]
+        ref_time = row["arr_actual"] if row["direction"] == "inbound" else row["dep_scheduled"]
+        time_str = ref_time.strftime("%H:%M") if pd.notna(ref_time) else "--:--"
+        label = f"{row['flight_id']}  {direction}  {origin}→{dest}  {time_str}"
         flight_options.append({"label": label, "value": row["flight_id"]})
     return flight_options
 
 
-def create_app(df: pd.DataFrame, G):
+def create_app(df: pd.DataFrame, graph):
     """Initialise and wire the Dash application."""
     flight_options = build_flight_options(df, inbound_only=True)
     source_label = str(df.attrs.get("data_source", "synthetic-hub-schedule")).replace("-", " ").upper()
@@ -59,15 +58,14 @@ def create_app(df: pd.DataFrame, G):
         update_title=None,
         suppress_callback_exceptions=True,
         meta_tags=[
-            {"name": "viewport",
-             "content": "width=device-width, initial-scale=1"}
+            {"name": "viewport", "content": "width=device-width, initial-scale=1"}
         ],
     )
     app.layout = build_layout(flight_options, source_label)
 
     # Register callbacks — no positions arg needed now (Cytoscape handles layout)
-    register_callbacks(app, G, df)
-    register_phase3_callbacks(app, G, df)
+    register_callbacks(app, graph, df)
+    register_phase3_callbacks(app, graph, df)
     return app
 
 
@@ -84,14 +82,19 @@ def load_runtime_context():
     logger.info(
         "Graph: %d nodes, %d edges  (%s)",
         summary["nodes"], summary["edges"],
-        " | ".join(f"{k}:{v}" for k, v in summary["edge_types"].items())
+        " | ".join(f"{k}:{v}" for k, v in summary["edge_types"].items()),
     )
     return df, graph
 
 
+def build_runtime_app():
+    """Create a fully-wired app using the current runtime schedule and graph."""
+    df, graph = load_runtime_context()
+    return create_app(df, graph)
+
+
 def main():
-    df, G = load_runtime_context()
-    app = create_app(df, G)
+    app = build_runtime_app()
 
     logger.info("─" * 60)
     logger.info("  SILSILA  ·  Cytoscape Ops Dashboard")
@@ -109,7 +112,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-else:
-    _df, _graph = load_runtime_context()
-    app = create_app(_df, _graph)
-    server = app.server

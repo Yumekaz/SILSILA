@@ -240,7 +240,7 @@ The repository includes:
 The current server entrypoint is:
 
 ```bash
-gunicorn app:server
+gunicorn server:server
 ```
 
 ## Limitations
