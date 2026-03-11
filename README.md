@@ -32,8 +32,9 @@ That is an accurate claim.
 - Recovery is no longer ranked only by hand-tuned heuristic score. A discrete optimization layer now minimizes a weighted objective across feasible actions.
 - Recovery options also expose Pareto-efficient tradeoffs rather than pretending there is always one obvious best answer.
 - Sensitivity analysis is implemented as an actual analysis path, not only as documentation.
-- Validation and deployment artifacts exist in the repository.
+- Validation, historical benchmarking, and deployment artifacts exist in the repository.
 - Cost assumptions are now routed through a documented calibration layer rather than only hand-tuned constants.
+- Historical validation now includes a five-case public benchmark harness with tolerance scoring.
 
 ## Key Features
 
@@ -167,7 +168,7 @@ This is a pragmatic compromise: the app remains runnable while documenting when 
 
 ## Validation
 
-The repository includes both automated tests and internal validation helpers.
+The repository includes automated tests, internal validation helpers, and a public-case historical benchmark harness.
 
 Automated checks currently cover:
 
@@ -182,6 +183,7 @@ Automated checks currently cover:
 - sensitivity-analysis behavior
 - PDF generation
 - state serialization
+- historical validation benchmark regressions
 
 Run:
 
@@ -192,7 +194,9 @@ pytest -q
 Relevant files:
 
 - [`engine/validation.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/validation.py)
+- [`engine/historical_validation.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/historical_validation.py)
 - [`tests/test_smoke.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/tests/test_smoke.py)
+- [`tests/test_historical_validation.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/tests/test_historical_validation.py)
 
 ## Documentation Package
 
@@ -250,7 +254,7 @@ gunicorn server:server
 The project still has important limits:
 
 - public real-data coverage is incomplete for full hub reconstruction
-- historical downstream validation is not fully closed with trusted operational ground truth
+- historical validation now includes a public five-case benchmark harness, but it is still not closed with airline-internal operational ground truth
 - cancellation economics are calibrated, but still not airline-internal finance truth
 - recovery optimization is discrete over candidate actions, not a network-wide mixed-integer optimizer
 - the repository does not include a confirmed live public deployment URL

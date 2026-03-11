@@ -16,6 +16,7 @@ Current automated checks cover:
 - state serialization round trips
 - turnaround sensitivity-analysis output
 - Pareto-front recovery annotation output
+- historical validation suite regression coverage
 
 Run:
 
@@ -25,14 +26,27 @@ pytest -q
 
 ## Validation
 
-Current validation level is prototype-grade:
+Current validation level is now stronger than prototype-only:
 
 - synthetic schedule behavior is internally consistent
 - model assumptions are documented
-- scenario outputs are plausible for demonstration and portfolio use
+- cost calibration is tied to published references
+- scenario outputs are benchmarked against five public disruption references using analog mapping and tolerance bands
 
-## Not Yet Complete
+## External-Case Benchmarking
 
-- formal comparison against 5-10 historical real-world disruptions
-- pass/fail table against externally verified operational outcomes
+The historical validation harness lives in `engine/historical_validation.py` and is documented in `docs/historical_validation.md`.
+
+What it checks:
+
+- moderate long-haul inbound delay realism
+- severe long-haul heavy-tail propagation
+- low-delay baseline behavior
+- rotation-led widebody spillover
+- crew-driven deep cascade behavior
+
+## Still Not Complete
+
+- airline-internal downstream truth data for exact connection misses, duty illegality, and swap decisions
+- one-to-one replay validation against OCC logs or airport operations datasets
 - calibrated validation against airline-specific duty and connection data
