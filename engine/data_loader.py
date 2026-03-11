@@ -13,32 +13,28 @@ warnings.filterwarnings(
     message="urllib3 .* doesn't match a supported version!",
     module="requests",
 )
-import requests
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta, timezone
 import logging
+from datetime import datetime, timedelta, timezone
+
+import numpy as np
+import pandas as pd
+import requests
+
+from engine.config import MIN_TURNAROUND_MINUTES, OPENSKY_URL, OTHH
 
 logger = logging.getLogger(__name__)
 REQUEST_HEADERS = {"User-Agent": "SILSILA/1.0 (educational ops simulator)"}
 
-# ─────────────────────────────────────────────
-from engine.config import (
-    OTHH,
-    OPENSKY_URL,
-    MIN_TURNAROUND_MINUTES,
-)
-
-# Real Qatar Airways fleet sample (tail → aircraft type → seats)
+# Real Qatar Airways fleet sample (tail -> aircraft type -> seats)
 QR_FLEET = {
-    "A7-APA": {"type": "A380-800",    "seats": 517, "range_km": 15200},
-    "A7-BAA": {"type": "B777-300ER",  "seats": 355, "range_km": 13650},
-    "A7-BAB": {"type": "B777-300ER",  "seats": 355, "range_km": 13650},
-    "A7-ALA": {"type": "A350-900",    "seats": 283, "range_km": 15000},
-    "A7-ALB": {"type": "A350-900",    "seats": 283, "range_km": 15000},
-    "A7-ALC": {"type": "A350-1000",   "seats": 327, "range_km": 16100},
-    "A7-BEA": {"type": "B787-8",      "seats": 254, "range_km": 13620},
-    "A7-BEB": {"type": "B787-8",      "seats": 254, "range_km": 13620},
+    "A7-APA": {"type": "A380-800", "seats": 517, "range_km": 15200},
+    "A7-BAA": {"type": "B777-300ER", "seats": 355, "range_km": 13650},
+    "A7-BAB": {"type": "B777-300ER", "seats": 355, "range_km": 13650},
+    "A7-ALA": {"type": "A350-900", "seats": 283, "range_km": 15000},
+    "A7-ALB": {"type": "A350-900", "seats": 283, "range_km": 15000},
+    "A7-ALC": {"type": "A350-1000", "seats": 327, "range_km": 16100},
+    "A7-BEA": {"type": "B787-8", "seats": 254, "range_km": 13620},
+    "A7-BEB": {"type": "B787-8", "seats": 254, "range_km": 13620},
 }
 
 # One representative crew per aircraft (simplified - real ops has many)
@@ -55,6 +51,88 @@ CREW_ASSIGNMENTS = {
     "A7-BEB": "CREW-07",
 }
 
+SYNTHETIC_ROTATIONS = [
+    {
+        "aircraft": "A7-BAA",
+        "origin": "EGLL",
+        "duration_h": 7.0,
+        "arrivals": [("QR007", 6, 20), ("QR107", None, None)],
+        "departures": [("QR008", None, None), ("QR108", None, None)],
+        "turn_buffer_1": 20,
+        "remote_buffer": 25,
+        "turn_buffer_2": 12,
+    },
+    {
+        "aircraft": "A7-ALC",
+        "origin": "KJFK",
+        "duration_h": 14.0,
+        "arrivals": [("QR021", 6, 50), ("QR121", None, None)],
+        "departures": [("QR020", None, None), ("QR120", None, None)],
+        "turn_buffer_1": 25,
+        "remote_buffer": 30,
+        "turn_buffer_2": 15,
+    },
+    {
+        "aircraft": "A7-ALA",
+        "origin": "LFPG",
+        "duration_h": 6.5,
+        "arrivals": [("QR052", 7, 10), ("QR152", None, None)],
+        "departures": [("QR051", None, None), ("QR151", None, None)],
+        "turn_buffer_1": 20,
+        "remote_buffer": 22,
+        "turn_buffer_2": 14,
+    },
+    {
+        "aircraft": "A7-ALB",
+        "origin": "EDDF",
+        "duration_h": 5.75,
+        "arrivals": [("QR068", 7, 30), ("QR168", None, None)],
+        "departures": [("QR067", None, None), ("QR167", None, None)],
+        "turn_buffer_1": 15,
+        "remote_buffer": 18,
+        "turn_buffer_2": 10,
+    },
+    {
+        "aircraft": "A7-BEA",
+        "origin": "VTBS",
+        "duration_h": 6.0,
+        "arrivals": [("QR402", 9, 20), ("QR452", None, None)],
+        "departures": [("QR401", None, None), ("QR451", None, None)],
+        "turn_buffer_1": 22,
+        "remote_buffer": 20,
+        "turn_buffer_2": 12,
+    },
+    {
+        "aircraft": "A7-BEB",
+        "origin": "WSSS",
+        "duration_h": 7.25,
+        "arrivals": [("QR502", 10, 5), ("QR552", None, None)],
+        "departures": [("QR501", None, None), ("QR551", None, None)],
+        "turn_buffer_1": 20,
+        "remote_buffer": 26,
+        "turn_buffer_2": 14,
+    },
+    {
+        "aircraft": "A7-APA",
+        "origin": "VABB",
+        "duration_h": 3.25,
+        "arrivals": [("QR548", 11, 0), ("QR648", None, None)],
+        "departures": [("QR547", None, None), ("QR647", None, None)],
+        "turn_buffer_1": 25,
+        "remote_buffer": 16,
+        "turn_buffer_2": 10,
+    },
+    {
+        "aircraft": "A7-BAB",
+        "origin": "WMKK",
+        "duration_h": 8.5,
+        "arrivals": [("QR842", 12, 30), ("QR942", None, None)],
+        "departures": [("QR841", None, None), ("QR941", None, None)],
+        "turn_buffer_1": 15,
+        "remote_buffer": 24,
+        "turn_buffer_2": 12,
+    },
+]
 
 REQUIRED_COLUMNS = {
     "flight_id",
@@ -96,7 +174,6 @@ def _fallback_for_open_sky(df: pd.DataFrame) -> pd.DataFrame:
     normalized["origin"] = normalized.get("origin", "UNKN").fillna("UNKN")
     normalized["destination"] = normalized.get("destination", OTHH).fillna(OTHH)
 
-    # OpenSky often returns transponder hex in icao24; map unknown/non-QR regs to representative fleet regs.
     regs_series = normalized["aircraft_reg"] if "aircraft_reg" in normalized.columns else pd.Series([None] * len(normalized))
     mapped_regs = []
     for idx, reg in enumerate(regs_series):
@@ -130,10 +207,7 @@ def _fallback_for_open_sky(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _schedule_is_usable(df: pd.DataFrame) -> bool:
-    """
-    Return True only if schedule supports dependency construction.
-    Current model requires both inbound and outbound flights.
-    """
+    """Return True only if schedule supports dependency construction."""
     if df is None or df.empty:
         return False
     if not REQUIRED_COLUMNS.issubset(df.columns):
@@ -143,18 +217,38 @@ def _schedule_is_usable(df: pd.DataFrame) -> bool:
     return bool(has_inbound and has_outbound)
 
 
+def _rotation_reference_time(row: pd.Series):
+    return row["arr_actual"] if row["direction"] == "inbound" else row["dep_scheduled"]
+
+
 def _apply_turnaround_slack(df: pd.DataFrame) -> pd.DataFrame:
-    """Recompute turnaround slack for each modeled aircraft rotation pair."""
+    """Recompute slack for each sequential same-aircraft rotation leg."""
+    df = df.copy()
     df["turnaround_slack_min"] = 0.0
 
-    inbound = df[df["direction"] == "inbound"].dropna(subset=["arr_actual"]).set_index("aircraft_reg")
-    outbound = df[df["direction"] == "outbound"].dropna(subset=["dep_scheduled"]).set_index("aircraft_reg")
+    for _, group in df.groupby("aircraft_reg"):
+        ordered = group.copy()
+        ordered["_ref_time"] = ordered.apply(_rotation_reference_time, axis=1)
+        ordered = ordered.sort_values("_ref_time")
+        ordered_rows = list(ordered.iterrows())
 
-    for reg in inbound.index.intersection(outbound.index):
-        arr = inbound.loc[reg, "arr_actual"]
-        dep = outbound.loc[reg, "dep_scheduled"]
-        slack = (dep - arr).total_seconds() / 60 - MIN_TURNAROUND_MINUTES
-        df.loc[df["aircraft_reg"] == reg, "turnaround_slack_min"] = round(slack, 1)
+        for pos in range(len(ordered_rows) - 1):
+            current_idx, current = ordered_rows[pos]
+            next_idx, nxt = ordered_rows[pos + 1]
+
+            if current["direction"] == "inbound" and nxt["direction"] == "outbound":
+                if pd.isna(current["arr_actual"]) or pd.isna(nxt["dep_scheduled"]):
+                    continue
+                slack = (nxt["dep_scheduled"] - current["arr_actual"]).total_seconds() / 60 - MIN_TURNAROUND_MINUTES
+                df.loc[next_idx, "turnaround_slack_min"] = round(slack, 1)
+            elif current["direction"] == "outbound" and nxt["direction"] == "inbound":
+                if pd.isna(current["dep_scheduled"]) or pd.isna(nxt["arr_scheduled"]):
+                    continue
+                if current["destination"] != nxt["origin"]:
+                    continue
+                remote_cycle_min = (current["block_time_h"] + nxt["block_time_h"]) * 60 + MIN_TURNAROUND_MINUTES
+                slack = (nxt["arr_scheduled"] - current["dep_scheduled"]).total_seconds() / 60 - remote_cycle_min
+                df.loc[next_idx, "turnaround_slack_min"] = round(slack, 1)
 
     df["turnaround_slack_min"] = df["turnaround_slack_min"].fillna(0.0)
     return df
@@ -200,15 +294,15 @@ def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
     Returns DataFrame or None if unavailable (rate-limited / no network).
     Free API: 400 calls/day unauthenticated.
     """
-    start = int(date.replace(hour=0,  minute=0,  second=0,  tzinfo=timezone.utc).timestamp())
-    end   = int(date.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc).timestamp())
+    start = int(date.replace(hour=0, minute=0, second=0, tzinfo=timezone.utc).timestamp())
+    end = int(date.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc).timestamp())
 
     try:
         resp = requests.get(
             OPENSKY_URL,
             params={"airport": OTHH, "begin": start, "end": end},
             headers=REQUEST_HEADERS,
-            timeout=10
+            timeout=10,
         )
         resp.raise_for_status()
         raw = resp.json()
@@ -217,20 +311,22 @@ def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
             return None
 
         flights = []
-        for f in raw:
-            callsign = (f.get("callsign") or "").strip()
-            if not callsign.startswith("QTR"):   # Qatar Airways ICAO prefix
+        for flight in raw:
+            callsign = (flight.get("callsign") or "").strip()
+            if not callsign.startswith("QTR"):
                 continue
-            flights.append({
-                "flight_id":   callsign,
-                "callsign":    callsign,
-                "origin":      f.get("estDepartureAirport", "UNKN"),
-                "destination": OTHH,
-                "arr_scheduled": datetime.fromtimestamp(f["lastSeen"], tz=timezone.utc),
-                "arr_actual":    datetime.fromtimestamp(f["lastSeen"], tz=timezone.utc),
-                "aircraft_reg":  f.get("icao24", "A7-UNK").upper(),
-                "direction":     "inbound",
-            })
+            flights.append(
+                {
+                    "flight_id": callsign,
+                    "callsign": callsign,
+                    "origin": flight.get("estDepartureAirport", "UNKN"),
+                    "destination": OTHH,
+                    "arr_scheduled": datetime.fromtimestamp(flight["lastSeen"], tz=timezone.utc),
+                    "arr_actual": datetime.fromtimestamp(flight["lastSeen"], tz=timezone.utc),
+                    "aircraft_reg": flight.get("icao24", "A7-UNK").upper(),
+                    "direction": "inbound",
+                }
+            )
 
         if not flights:
             return None
@@ -245,126 +341,100 @@ def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
 
 def build_synthetic_schedule(base_date: datetime | None = None) -> pd.DataFrame:
     """
-    Synthetic one-day DOH schedule built from real QR flight numbers,
-    real route distances, and realistic hub-wave timing.
+    Synthetic DOH schedule built from representative QR routes and chained rotations.
 
-    Structure:
-      - Wave 1 arrivals  04:00–07:00  (long-haul overnights from US/Europe)
-      - Wave 1 departures 07:00–09:30 (these aircraft rotate out to Asia/short-haul)
-      - Wave 2 arrivals  09:00–13:00  (Asia, Africa, short-haul)
-      - Wave 2 departures 13:00–16:30
-      - Wave 3 arrivals  17:00–21:00  (Europe afternoon, more Asia)
-      - Wave 3 departures 21:00–23:59
+    Each modeled aircraft performs two full rotations:
+      inbound_1 -> outbound_1 -> return_inbound_2 -> outbound_2
 
-    Each aircraft does one inbound + one outbound rotation for simplicity.
-    Load factors drawn from a truncated normal (μ=0.85, σ=0.08).
+    This creates genuine multi-hop aircraft chains so a disruption can propagate
+    across more than one turn instead of stopping after the first hub departure.
     """
     if base_date is None:
-        base_date = datetime.now(tz=timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        base_date = datetime.now(tz=timezone.utc)
+    base_date = base_date.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    def t(h, m):
-        return base_date + timedelta(hours=h, minutes=m)
+    def clock(hour: int, minute: int):
+        return base_date + timedelta(hours=hour, minutes=minute)
 
     rng = np.random.default_rng(seed=42)
 
-    def lf():
+    def load_factor() -> float:
         return float(np.clip(rng.normal(0.85, 0.08), 0.60, 1.0))
 
-    # ── Inbound flights ────────────────────────────────────────────────────────
-    inbound = [
-        # Wave 1 – long haul overnights (arrive 06:20–07:30, tight window)
-        {"flight_id": "QR007",  "origin": "EGLL", "dest": "OTHH", "aircraft": "A7-BAA",
-         "arr_sched": t(6, 20),  "duration_h": 7.0,  "seats": 355, "lf": lf()},
-        {"flight_id": "QR021",  "origin": "KJFK", "dest": "OTHH", "aircraft": "A7-ALC",
-         "arr_sched": t(6, 50),  "duration_h": 14.0, "seats": 327, "lf": lf()},
-        {"flight_id": "QR052",  "origin": "LFPG", "dest": "OTHH", "aircraft": "A7-ALA",
-         "arr_sched": t(7, 10),  "duration_h": 6.5,  "seats": 283, "lf": lf()},
-        {"flight_id": "QR068",  "origin": "EDDF", "dest": "OTHH", "aircraft": "A7-ALB",
-         "arr_sched": t(7, 30),  "duration_h": 5.75, "seats": 283, "lf": lf()},
-        # Wave 2 – Asia/Africa midday
-        {"flight_id": "QR402",  "origin": "VTBS", "dest": "OTHH", "aircraft": "A7-BEA",
-         "arr_sched": t(9, 20),  "duration_h": 6.0,  "seats": 254, "lf": lf()},
-        {"flight_id": "QR502",  "origin": "WSSS", "dest": "OTHH", "aircraft": "A7-BEB",
-         "arr_sched": t(10, 5),  "duration_h": 7.25, "seats": 254, "lf": lf()},
-        {"flight_id": "QR548",  "origin": "VABB", "dest": "OTHH", "aircraft": "A7-APA",
-         "arr_sched": t(11, 0),  "duration_h": 3.25, "seats": 517, "lf": lf()},
-        {"flight_id": "QR842",  "origin": "WMKK", "dest": "OTHH", "aircraft": "A7-BAB",
-         "arr_sched": t(12, 30), "duration_h": 8.5,  "seats": 355, "lf": lf()},
-    ]
-
-    # ── Outbound flights — tight turnarounds (55–75 min) to ensure realistic cascades
-    outbound = [
-        # Wave 1 rotations — ~60 min turnaround → slack 10–20 min above MIN
-        {"flight_id": "QR008",  "origin": "OTHH", "dest": "EGLL", "aircraft": "A7-BAA",
-         "dep_sched": t(7, 25),  "duration_h": 7.0,  "seats": 355, "lf": lf()},  # 65m from QR007 arr
-        {"flight_id": "QR020",  "origin": "OTHH", "dest": "KJFK", "aircraft": "A7-ALC",
-         "dep_sched": t(8, 0),   "duration_h": 14.0, "seats": 327, "lf": lf()},  # 70m from QR021 arr
-        {"flight_id": "QR051",  "origin": "OTHH", "dest": "LFPG", "aircraft": "A7-ALA",
-         "dep_sched": t(8, 15),  "duration_h": 6.5,  "seats": 283, "lf": lf()},  # 65m from QR052 arr
-        {"flight_id": "QR067",  "origin": "OTHH", "dest": "EDDF", "aircraft": "A7-ALB",
-         "dep_sched": t(8, 30),  "duration_h": 5.75, "seats": 283, "lf": lf()},  # 60m from QR068 arr
-        # Wave 2 rotations — 60–70 min turnaround
-        {"flight_id": "QR401",  "origin": "OTHH", "dest": "VTBS", "aircraft": "A7-BEA",
-         "dep_sched": t(10, 30), "duration_h": 6.0,  "seats": 254, "lf": lf()},  # 70m from QR402 arr
-        {"flight_id": "QR501",  "origin": "OTHH", "dest": "WSSS", "aircraft": "A7-BEB",
-         "dep_sched": t(11, 10), "duration_h": 7.25, "seats": 254, "lf": lf()},  # 65m from QR502 arr
-        {"flight_id": "QR547",  "origin": "OTHH", "dest": "VABB", "aircraft": "A7-APA",
-         "dep_sched": t(12, 10), "duration_h": 3.25, "seats": 517, "lf": lf()},  # 70m from QR548 arr
-        {"flight_id": "QR841",  "origin": "OTHH", "dest": "WMKK", "aircraft": "A7-BAB",
-         "dep_sched": t(13, 30), "duration_h": 8.5,  "seats": 355, "lf": lf()},  # 60m from QR842 arr
-    ]
-
     rows = []
+    for template in SYNTHETIC_ROTATIONS:
+        aircraft = template["aircraft"]
+        seats = QR_FLEET[aircraft]["seats"]
+        duration_h = float(template["duration_h"])
+        duration_min = duration_h * 60
+        origin = template["origin"]
 
-    for f in inbound:
-        arr_actual = f["arr_sched"] + timedelta(minutes=int(rng.integers(-5, 15)))
-        rows.append({
-            "flight_id":        f["flight_id"],
-            "direction":        "inbound",
-            "origin":           f["origin"],
-            "destination":      "OTHH",
-            "aircraft_reg":     f["aircraft"],
-            "aircraft_type":    QR_FLEET[f["aircraft"]]["type"],
-            "crew_id":          CREW_ASSIGNMENTS[f["aircraft"]],
-            "seats":            f["seats"],
-            "load_factor":      round(f["lf"], 3),
-            "pax":              int(f["seats"] * f["lf"]),
-            "arr_scheduled":    f["arr_sched"],
-            "arr_actual":       arr_actual,
-            "dep_scheduled":    pd.NaT,
-            "dep_actual":       pd.NaT,
-            "arr_delay_min":    round((arr_actual - f["arr_sched"]).total_seconds() / 60, 1),
-            "dep_delay_min":    0.0,
-            "status":           "landed",
-            "block_time_h":     f["duration_h"],
-        })
+        arr1_sched = clock(template["arrivals"][0][1], template["arrivals"][0][2])
+        dep1_sched = arr1_sched + timedelta(minutes=MIN_TURNAROUND_MINUTES + template["turn_buffer_1"])
+        arr2_sched = dep1_sched + timedelta(minutes=(duration_min * 2) + MIN_TURNAROUND_MINUTES + template["remote_buffer"])
+        dep2_sched = arr2_sched + timedelta(minutes=MIN_TURNAROUND_MINUTES + template["turn_buffer_2"])
 
-    for f in outbound:
-        rows.append({
-            "flight_id":        f["flight_id"],
-            "direction":        "outbound",
-            "origin":           "OTHH",
-            "destination":      f["dest"],
-            "aircraft_reg":     f["aircraft"],
-            "aircraft_type":    QR_FLEET[f["aircraft"]]["type"],
-            "crew_id":          CREW_ASSIGNMENTS[f["aircraft"]],
-            "seats":            f["seats"],
-            "load_factor":      round(f["lf"], 3),
-            "pax":              int(f["seats"] * f["lf"]),
-            "arr_scheduled":    pd.NaT,
-            "arr_actual":       pd.NaT,
-            "dep_scheduled":    f["dep_sched"],
-            "dep_actual":       f["dep_sched"],          # starts on-time; cascade will change this
-            "arr_delay_min":    0.0,
-            "dep_delay_min":    0.0,
-            "status":           "scheduled",
-            "block_time_h":     f["duration_h"],
-        })
+        inbound_specs = [
+            (template["arrivals"][0][0], arr1_sched),
+            (template["arrivals"][1][0], arr2_sched),
+        ]
+        outbound_specs = [
+            (template["departures"][0][0], dep1_sched),
+            (template["departures"][1][0], dep2_sched),
+        ]
+
+        for flight_id, arr_sched in inbound_specs:
+            lf = load_factor()
+            arr_actual = arr_sched + timedelta(minutes=int(rng.integers(-5, 15)))
+            rows.append(
+                {
+                    "flight_id": flight_id,
+                    "direction": "inbound",
+                    "origin": origin,
+                    "destination": OTHH,
+                    "aircraft_reg": aircraft,
+                    "aircraft_type": QR_FLEET[aircraft]["type"],
+                    "crew_id": CREW_ASSIGNMENTS[aircraft],
+                    "seats": seats,
+                    "load_factor": round(lf, 3),
+                    "pax": int(seats * lf),
+                    "arr_scheduled": arr_sched,
+                    "arr_actual": arr_actual,
+                    "dep_scheduled": pd.NaT,
+                    "dep_actual": pd.NaT,
+                    "arr_delay_min": round((arr_actual - arr_sched).total_seconds() / 60, 1),
+                    "dep_delay_min": 0.0,
+                    "status": "landed",
+                    "block_time_h": duration_h,
+                }
+            )
+
+        for flight_id, dep_sched in outbound_specs:
+            lf = load_factor()
+            rows.append(
+                {
+                    "flight_id": flight_id,
+                    "direction": "outbound",
+                    "origin": OTHH,
+                    "destination": origin,
+                    "aircraft_reg": aircraft,
+                    "aircraft_type": QR_FLEET[aircraft]["type"],
+                    "crew_id": CREW_ASSIGNMENTS[aircraft],
+                    "seats": seats,
+                    "load_factor": round(lf, 3),
+                    "pax": int(seats * lf),
+                    "arr_scheduled": pd.NaT,
+                    "arr_actual": pd.NaT,
+                    "dep_scheduled": dep_sched,
+                    "dep_actual": dep_sched,
+                    "arr_delay_min": 0.0,
+                    "dep_delay_min": 0.0,
+                    "status": "scheduled",
+                    "block_time_h": duration_h,
+                }
+            )
 
     df = pd.DataFrame(rows)
-
     df = _apply_turnaround_slack(df)
     df = df.reset_index(drop=True)
     df.attrs["data_source"] = "synthetic-hub-schedule"
@@ -396,9 +466,7 @@ def load_schedule(date: datetime | None = None, use_opensky: bool = True) -> pd.
                 return hybrid
 
         if df is not None and len(df) > 0:
-            logger.info(
-                "OpenSky payload incomplete for a hybrid schedule. Using synthetic schedule."
-            )
+            logger.info("OpenSky payload incomplete for a hybrid schedule. Using synthetic schedule.")
         else:
             logger.info("Using synthetic schedule.")
 

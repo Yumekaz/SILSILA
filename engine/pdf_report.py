@@ -381,7 +381,7 @@ def _se_note_section(story, styles):
     story.append(Spacer(1, 4*mm))
     story.append(Paragraph(
         "Data sources: OpenSky Network (public), Qatar Airways public timetable, "
-        "IATA delay cost benchmarks, EUROCONTROL Annual Report 2024. "
+        "EUROCONTROL Standard Inputs Ed. 10, ECB exchange-rate references, EUR-Lex 261/2004, and UK CAA passenger-rights guidance. "
         "No proprietary Qatar Airways operational data used.",
         styles["footnote"]
     ))
@@ -467,3 +467,4 @@ def generate_pdf_report(
 
     doc.build(story)
     return output_path
+

@@ -6,19 +6,15 @@ Core Dash callbacks for live simulation, recovery, and shared figure builders.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 
 from dash import Input, Output, State, html
 import plotly.graph_objects as go
 import pandas as pd
 
-from engine.cascade import run_cascade, cascaded_schedule
-from engine.optimizer import optimize_recovery_options
-from engine.recovery import evaluate_all_recovery_options
 from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
 from ui.session_state import serialize_cascade_result, serialize_recovery_options
-
+from ui.workflows import run_simulation_bundle, select_recovery_option
 
 COLORS = {
     "bg_0":    "#06090F",
@@ -145,6 +141,7 @@ def register_callbacks(app, G, df):
         Output("recovery-status-badge", "children"),
         Output("optimizer-summary", "children"),
         Output("recovery-options-store", "data"),
+        Output("selected-recovery-store", "data"),
         Input("trigger-btn", "n_clicks"),
         Input("reset-btn", "n_clicks"),
         State("flight-select", "value"),
@@ -170,6 +167,7 @@ def register_callbacks(app, G, df):
                 "AWAITING CASCADE",
                 html.Div(),
                 None,
+                None,
             )
 
         if not flight_id or not delay_min:
@@ -185,26 +183,24 @@ def register_callbacks(app, G, df):
                 "AWAITING CASCADE",
                 html.Div(),
                 None,
+                None,
             )
 
-        result = run_cascade(G, flight_id, float(delay_min))
-        df_cascaded = cascaded_schedule(df, G, result)
-        affected_ids = {event.flight_id for event in result.events}
-        recovery_options = evaluate_all_recovery_options(G, df, result)
-        optimization = optimize_recovery_options(recovery_options)
+        bundle = run_simulation_bundle(G, df, flight_id, float(delay_min))
 
         return (
-            serialize_cascade_result(result, G),
-            build_cyto_elements(G, df_cascaded, flight_id, affected_ids),
+            serialize_cascade_result(bundle.cascade_result, G),
+            build_cyto_elements(G, bundle.cascaded_df, flight_id, bundle.affected_ids),
             cyto_stylesheet,
-            _build_cascade_log(result),
-            f"{result.flights_affected} AFFECTED",
-            _build_gantt(df_cascaded, result),
-            _build_summary_metrics(result),
-            _build_recovery_cards(recovery_options),
-            f"{len([option for option in recovery_options if option.feasible])} OPTIONS READY",
-            _build_optimizer_summary(optimization),
-            serialize_recovery_options(recovery_options),
+            _build_cascade_log(bundle.cascade_result),
+            f"{bundle.cascade_result.flights_affected} AFFECTED",
+            _build_gantt(bundle.cascaded_df, bundle.cascade_result),
+            _build_summary_metrics(bundle.cascade_result),
+            _build_recovery_cards(bundle.recovery_options),
+            f"{len([option for option in bundle.recovery_options if option.feasible])} OPTIONS READY",
+            _build_optimizer_summary(bundle.optimization),
+            serialize_recovery_options(bundle.recovery_options),
+            None,
         )
 
     @app.callback(
@@ -215,32 +211,25 @@ def register_callbacks(app, G, df):
         Input({"type": "recovery-select-btn", "index": 1}, "n_clicks"),
         Input({"type": "recovery-select-btn", "index": 2}, "n_clicks"),
         State("flight-select", "value"),
-        State("delay-slider", "value"),
+        State("recovery-options-store", "data"),
         prevent_initial_call=True,
     )
-    def apply_recovery(c0, c1, c2, flight_id, delay_min):
+    def apply_recovery(c0, c1, c2, flight_id, recovery_store):
         from dash import ctx
         from dash.exceptions import PreventUpdate
 
-        if not ctx.triggered_id or not flight_id or not delay_min:
+        if not ctx.triggered_id or not flight_id or not recovery_store:
             raise PreventUpdate
 
         triggered_idx = ctx.triggered_id.get("index", 0)
-        result = run_cascade(G, flight_id, float(delay_min))
-        options = evaluate_all_recovery_options(G, df, result)
-
-        if triggered_idx >= len(options):
+        selection = select_recovery_option(recovery_store, triggered_idx)
+        if selection is None:
             raise PreventUpdate
 
-        selected = options[triggered_idx]
-        if not selected.feasible or selected.df_recovered is None:
-            raise PreventUpdate
-
-        affected_ids = {event.flight_id for event in selected.residual_events}
         return (
-            _build_gantt(selected.df_recovered, result, recovery_label=selected.label),
-            build_cyto_elements(G, selected.df_recovered, flight_id, affected_ids),
-            json.dumps({"strategy": selected.strategy, "label": selected.label}),
+            _build_gantt(selection.recovered_df, None, recovery_label=selection.option_payload.get("label")),
+            build_cyto_elements(G, selection.recovered_df, flight_id, selection.affected_ids),
+            selection.selected_store,
         )
 
     @app.callback(
@@ -561,3 +550,11 @@ def _build_gantt(df: pd.DataFrame, result, recovery_label: str | None = None) ->
         ),
     )
     return fig
+
+
+
+
+
+
+
+

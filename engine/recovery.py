@@ -35,11 +35,10 @@ from engine.config import (
     SPARE_AIRCRAFT_POOL,
     SWAP_POSITIONING_COST,
     SWAP_READINESS_MINUTES,
-    CANCEL_REBOOKING_COST_PER_PAX,
-    CANCEL_EU261_THRESHOLD_MIN,
-    CANCEL_EU261_COST_PER_PAX,
+    CANCEL_DELAY_THRESHOLD_MIN,
     COMPRESS_TURNAROUND_MINUTES,
 )
+from engine.cost_model import cancellation_cost_breakdown_usd, passenger_rights_coverage
 from engine.cascade import CascadeResult, run_cascade
 
 
@@ -162,6 +161,22 @@ def _apply_event_delay(df: pd.DataFrame, event, status: str | None = None) -> tu
         event.delay_min * pax * COST_PAX_PER_MIN
     )
     return pax, cost
+
+
+def _events_in_chain(result: CascadeResult, anchor_flight_id: str) -> list:
+    """Return all events downstream of an anchor flight, including the anchor itself."""
+    return [
+        event for event in result.events
+        if event.flight_id == anchor_flight_id or anchor_flight_id in event.propagation_path
+    ]
+
+
+def _chain_impact(result: CascadeResult, anchor_flight_id: str) -> tuple[float, float]:
+    chain_events = _events_in_chain(result, anchor_flight_id)
+    return (
+        sum(event.delay_min for event in chain_events),
+        sum(event.cost_usd for event in chain_events),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -496,69 +511,85 @@ def heuristic_cancel(
     result: CascadeResult,
 ) -> RecoveryOption:
     """
-    CANCEL: Cancel the most cascade-affected outbound flight.
+    CANCEL: remove the highest-impact disrupted leg and break its downstream chain.
 
-    Logic:
-    1. Find the ROTATION successor with the highest propagated delay.
-    2. Cancel it. This frees the aircraft from the cascade chain.
-    3. Rebook all passengers to next available same-route departure.
-    4. Cost = rebooking cost per pax + EU261 compensation if delay > 3h.
-    5. Downstream flights in that aircraft's chain are now freed.
-
-    This is the high-immediate-cost, low-residual-delay strategy.
-    Best when the cascade is deep and the cancelled flight has low load.
+    The target is chosen by downstream chain impact rather than local delay alone,
+    which makes the heuristic materially more realistic on multi-hop aircraft cycles.
     """
     trigger_id = result.trigger_flight
 
-    # ── Find best candidate to cancel ────────────────────────────────────────
-    rotation_events = [e for e in result.events if e.edge_type == "ROTATION"]
-
+    rotation_events = [event for event in result.events if event.edge_type == "ROTATION"]
     if not rotation_events:
         return RecoveryOption(
-            strategy="CANCEL", label="Cancel Flight", feasible=False,
-            description="Cancel highest-delay outbound. Rebook passengers.",
+            strategy="CANCEL",
+            label="Cancel Flight",
+            feasible=False,
+            description="Cancel highest-impact disrupted leg and re-accommodate passengers.",
             infeasibility_reason="No ROTATION cascade events — nothing to cancel.",
             baseline_delay_min=result.total_delay_min,
             baseline_pax_affected=result.total_pax_affected,
         )
 
-    # Cancel the flight with highest delay (worst rotation hit)
-    target_event = max(rotation_events, key=lambda e: e.delay_min)
-    target_id    = target_event.flight_id
-    target_row   = _flight_row(df, target_id)
-
+    target_event = max(
+        rotation_events,
+        key=lambda event: (_chain_impact(result, event.flight_id)[1], _chain_impact(result, event.flight_id)[0]),
+    )
+    target_id = target_event.flight_id
+    target_row = _flight_row(df, target_id)
     if target_row is None:
-        return RecoveryOption(strategy="CANCEL", label="Cancel Flight", feasible=False,
-                              description="Cancel highest-delay outbound. Rebook passengers.",
-                              infeasibility_reason=f"Flight {target_id} not found.")
+        return RecoveryOption(
+            strategy="CANCEL",
+            label="Cancel Flight",
+            feasible=False,
+            description="Cancel highest-impact disrupted leg and re-accommodate passengers.",
+            infeasibility_reason=f"Flight {target_id} not found.",
+        )
+
+    cancelled_chain = _events_in_chain(result, target_id)
+    cancelled_ids = {event.flight_id for event in cancelled_chain}
+    removed_delay_min, removed_cost_usd = _chain_impact(result, target_id)
+
+    rights = passenger_rights_coverage(target_row["origin"], target_row["destination"])
+    cancel_cost = cancellation_cost_breakdown_usd(int(target_row["seats"]))
 
     action_log = [
         f"Trigger: {trigger_id} delayed +{result.trigger_delay_min:.0f} min",
-        f"Cancel candidate: {target_id} (would be +{target_event.delay_min:.0f} min late)",
-        f"Passengers to rebook: {target_row['pax']:,}",
+        f"Cancel candidate: {target_id} (chain impact {removed_delay_min:.0f} min, ${removed_cost_usd:,.0f})",
+        f"Passengers to reaccommodate: {int(target_row['pax']):,}",
+        f"Calibrated cancellation estimate: ${cancel_cost.total_usd:,.0f} for {int(target_row['seats'])}-seat class",
     ]
 
-    # ── Build recovered schedule ─────────────────────────────────────────────
-    df_rec = df.copy()
+    if rights.eligible and target_event.delay_min >= CANCEL_DELAY_THRESHOLD_MIN:
+        action_log.append(
+            f"  Passenger-rights regime: {rights.scheme} in scope, indicative statutory amount ${rights.amount_per_pax_usd:,.0f} per pax"
+        )
+    elif rights.eligible:
+        action_log.append(
+            f"  Passenger-rights regime: {rights.scheme} in scope, but disruption is below the {CANCEL_DELAY_THRESHOLD_MIN} min compensation trigger"
+        )
+    else:
+        action_log.append("  Passenger-rights regime: no EU/UK statutory compensation exposure on this leg")
 
+    df_rec = df.copy()
     _apply_trigger_delay(df_rec, trigger_id, result.trigger_delay_min)
 
-    # Cancel the target flight
     cancel_mask = df_rec["flight_id"] == target_id
-    df_rec.loc[cancel_mask, "status"]       = "cancelled"
-    df_rec.loc[cancel_mask, "dep_delay_min"] = 0.0
-    action_log.append(f"  {target_id} → CANCELLED")
+    if target_row["direction"] == "inbound":
+        df_rec.loc[cancel_mask, "arr_delay_min"] = 0.0
+        df_rec.loc[cancel_mask, "arr_actual"] = df_rec.loc[cancel_mask, "arr_scheduled"]
+    else:
+        df_rec.loc[cancel_mask, "dep_delay_min"] = 0.0
+        df_rec.loc[cancel_mask, "dep_actual"] = df_rec.loc[cancel_mask, "dep_scheduled"]
+    df_rec.loc[cancel_mask, "status"] = "cancelled"
+    action_log.append(f"  {target_id} -> CANCELLED")
 
-    # Other cascade events still propagate (non-cancelled chain)
+    residual_events = [event for event in result.events if event.flight_id not in cancelled_ids]
     residual_delay_min = 0.0
     residual_cost = 0.0
     residual_flights = set()
     residual_pax_affected = 0
 
-    for event in result.events:
-        if event.flight_id == target_id:
-            continue   # cancelled — no delay
-
+    for event in residual_events:
         mask = df_rec["flight_id"] == event.flight_id
         if not mask.any():
             continue
@@ -569,46 +600,32 @@ def heuristic_cancel(
         if event.flight_id not in residual_flights:
             residual_flights.add(event.flight_id)
             residual_pax_affected += int(pax)
-        action_log.append(f"  {event.flight_id}: +{event.delay_min:.0f}m residual (not in cancelled chain)")
+        action_log.append(f"  {event.flight_id}: +{event.delay_min:.0f}m residual outside cancelled chain")
 
-    # ── Cost ──────────────────────────────────────────────────────────────────
-    cancelled_pax = int(target_row["pax"])
-    rebooking_cost = cancelled_pax * CANCEL_REBOOKING_COST_PER_PAX
-
-    # EU261 applies if delay on the rebooked service > 3 hours
-    eu261_cost = 0.0
-    if target_event.delay_min >= CANCEL_EU261_THRESHOLD_MIN:
-        eu261_cost = cancelled_pax * CANCEL_EU261_COST_PER_PAX
-        action_log.append(
-            f"  EU261 compensation triggered (+{target_event.delay_min:.0f}m > {CANCEL_EU261_THRESHOLD_MIN}m): "
-            f"${eu261_cost:,.0f}"
-        )
-    else:
-        action_log.append(f"  EU261 NOT triggered ({target_event.delay_min:.0f}m < {CANCEL_EU261_THRESHOLD_MIN}m)")
-
-    direct_cost   = rebooking_cost + eu261_cost
-    total_cost    = direct_cost + residual_cost
+    direct_cost = cancel_cost.total_usd
+    total_cost = direct_cost + residual_cost
     baseline_cost = result.total_cost_usd
-    cost_saved    = baseline_cost - total_cost
+    cost_saved = baseline_cost - total_cost
 
     delay_reduction = result.total_delay_min - residual_delay_min
-    delay_pct       = (delay_reduction / result.total_delay_min * 100) if result.total_delay_min > 0 else 0
-    pax_saved       = max(0, result.total_pax_affected - residual_pax_affected)
+    delay_pct = (delay_reduction / result.total_delay_min * 100) if result.total_delay_min > 0 else 0
+    pax_saved = max(0, result.total_pax_affected - residual_pax_affected)
 
-    # Score: 55% delay, 45% cost efficiency
     cost_ratio = min(1.0, max(0.0, 1.0 - (total_cost / max(baseline_cost, 1))))
     score = max(0, min(100, delay_pct * 0.55 + cost_ratio * 45))
 
-    action_log.append(f"Rebooking cost: ${rebooking_cost:,.0f} ({cancelled_pax} pax × ${CANCEL_REBOOKING_COST_PER_PAX})")
-    action_log.append(f"Total direct cost: ${direct_cost:,.0f}")
+    action_log.append(
+        f"Direct cancellation cost: ${direct_cost:,.0f} (${cancel_cost.operational_base_usd:,.0f} ops/revenue + ${cancel_cost.passenger_care_comp_usd:,.0f} passenger care)"
+    )
+    action_log.append(f"Downstream chain removed: {len(cancelled_chain)} flights, {removed_delay_min:.0f} delay min")
     action_log.append(f"Delay reduced by {delay_reduction:.0f} min ({delay_pct:.0f}%)")
 
     return RecoveryOption(
         strategy="CANCEL",
         label="Cancel & Rebook",
         description=(
-            f"Cancel {target_id} (+{target_event.delay_min:.0f}m delayed). "
-            f"Rebook {cancelled_pax:,} pax. Breaks cascade chain."
+            f"Cancel {target_id} and remove its downstream chain impact. "
+            f"Calibrated using EUROCONTROL seat-bucket cancellation costs."
         ),
         feasible=True,
         baseline_delay_min=result.total_delay_min,
@@ -618,15 +635,17 @@ def heuristic_cancel(
         baseline_pax_affected=result.total_pax_affected,
         recovered_pax_affected=residual_pax_affected,
         pax_saved=pax_saved,
-        pax_stranded=cancelled_pax,
+        pax_stranded=int(target_row["pax"]),
         direct_cost_usd=round(direct_cost, 0),
         cascade_cost_saved=round(cost_saved, 0),
         net_cost_usd=round(total_cost, 0),
         score=round(score, 1),
         df_recovered=df_rec,
         action_log=action_log,
-        residual_events=[e for e in result.events if e.flight_id != target_id],
+        residual_events=residual_events,
     )
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -669,3 +688,6 @@ def evaluate_all_recovery_options(
     if ranked:
         ranked[0].recommendation = "TOP SCORE" if not ranked[0].pareto_efficient else "PARETO · TOP SCORE"
     return ranked
+
+
+

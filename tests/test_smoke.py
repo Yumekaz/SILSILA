@@ -22,10 +22,12 @@ from engine.validation import validate_graph, validate_schedule
 from ui.session_state import (
     deserialize_cascade_store,
     deserialize_mc_store,
+    deserialize_recovery_option_frame,
     deserialize_recovery_store,
     serialize_cascade_result,
     serialize_recovery_options,
 )
+from ui.workflows import run_simulation_bundle
 @pytest.fixture(scope="module")
 def schedule_df():
     return load_schedule(datetime.now(timezone.utc), use_opensky=False)
@@ -78,18 +80,34 @@ def test_rotation_edges_match_aircraft_and_schedule_slack(schedule_df, dependenc
     ]
 
     assert rotation_edges
+    assert any(
+        schedule_df[schedule_df["flight_id"] == u].iloc[0]["direction"] == "outbound"
+        and schedule_df[schedule_df["flight_id"] == v].iloc[0]["direction"] == "inbound"
+        for u, v, _ in rotation_edges
+    )
+
     for u, v, data in rotation_edges:
-        inb = schedule_df[schedule_df["flight_id"] == u].iloc[0]
-        out = schedule_df[schedule_df["flight_id"] == v].iloc[0]
+        upstream = schedule_df[schedule_df["flight_id"] == u].iloc[0]
+        downstream = schedule_df[schedule_df["flight_id"] == v].iloc[0]
 
-        assert inb["direction"] == "inbound"
-        assert out["direction"] == "outbound"
-        assert inb["aircraft_reg"] == out["aircraft_reg"]
+        assert upstream["aircraft_reg"] == downstream["aircraft_reg"]
 
-        expected_slack = round(
-            (out["dep_scheduled"] - inb["arr_actual"]).total_seconds() / 60 - 45,
-            1,
-        )
+        if upstream["direction"] == "inbound" and downstream["direction"] == "outbound":
+            expected_slack = round(
+                (downstream["dep_scheduled"] - upstream["arr_actual"]).total_seconds() / 60 - 45,
+                1,
+            )
+        elif upstream["direction"] == "outbound" and downstream["direction"] == "inbound":
+            expected_slack = round(
+                (
+                    downstream["arr_scheduled"] - upstream["dep_scheduled"]
+                ).total_seconds() / 60
+                - ((upstream["block_time_h"] + downstream["block_time_h"]) * 60 + 45),
+                1,
+            )
+        else:
+            pytest.fail(f"Unexpected rotation edge direction pair: {u} -> {v}")
+
         assert data["slack_min"] == pytest.approx(expected_slack)
 
 
@@ -305,6 +323,14 @@ def test_recovery_options_serialize_for_export(schedule_df, dependency_graph):
     assert all("label" in item and "score" in item for item in restored)
     assert all("pareto_efficient" in item for item in restored)
     assert all("objective_score" in item for item in restored)
+    assert all("action_log" in item for item in restored)
+    assert all("residual_events" in item for item in restored)
+
+    feasible = next(item for item in restored if item["feasible"])
+    recovered_df = deserialize_recovery_option_frame(feasible)
+    assert recovered_df is not None
+    assert len(recovered_df) == len(schedule_df)
+    assert feasible["action_log"]
 
 
 def test_turnaround_sensitivity_returns_ordered_scenarios(schedule_df):
@@ -369,3 +395,23 @@ def test_heatmap_rows_use_distinct_trigger_and_cost_metrics():
     assert heatmap["annots"][0][0].endswith("flights")
     assert heatmap["annots"][2][0].startswith("$")
     assert heatmap["z"][0] != heatmap["z"][2]
+
+
+
+
+
+def test_simulation_bundle_matches_direct_pipeline(schedule_df, dependency_graph):
+    trigger_id = schedule_df.iloc[0]["flight_id"]
+    bundle = run_simulation_bundle(dependency_graph, schedule_df, trigger_id, 30.0)
+
+    direct_result = run_cascade(dependency_graph, trigger_id, 30.0)
+    direct_df = cascaded_schedule(schedule_df, dependency_graph, direct_result)
+    direct_options = evaluate_all_recovery_options(dependency_graph, schedule_df, direct_result)
+    direct_optimization = optimize_recovery_options(direct_options)
+
+    assert bundle.cascade_result.summary() == direct_result.summary()
+    assert bundle.cascaded_df.equals(direct_df)
+    assert bundle.affected_ids == {event.flight_id for event in direct_result.events}
+    assert [option.strategy for option in bundle.recovery_options] == [option.strategy for option in direct_options]
+    assert bundle.optimization.best_strategy == direct_optimization.best_strategy
+

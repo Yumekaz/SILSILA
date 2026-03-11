@@ -33,6 +33,7 @@ That is an accurate claim.
 - Recovery options also expose Pareto-efficient tradeoffs rather than pretending there is always one obvious best answer.
 - Sensitivity analysis is implemented as an actual analysis path, not only as documentation.
 - Validation and deployment artifacts exist in the repository.
+- Cost assumptions are now routed through a documented calibration layer rather than only hand-tuned constants.
 
 ## Key Features
 
@@ -204,6 +205,7 @@ The repository includes a dedicated engineering documentation set under [`docs/`
 - [`fmea.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/fmea.md)
 - [`verification_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/verification_validation.md)
 - [`historical_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/historical_validation.md)
+- [`cost_calibration.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/cost_calibration.md)
 - [`deployment.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/deployment.md)
 - [`demo_assets.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/demo_assets.md)
 
@@ -249,8 +251,11 @@ The project still has important limits:
 
 - public real-data coverage is incomplete for full hub reconstruction
 - historical downstream validation is not fully closed with trusted operational ground truth
+- cancellation economics are calibrated, but still not airline-internal finance truth
 - recovery optimization is discrete over candidate actions, not a network-wide mixed-integer optimizer
 - the repository does not include a confirmed live public deployment URL
 - the demo-assets folder is scaffolded but not yet populated with curated screenshots/video
 
 These are real limitations and should be stated plainly.
+
+

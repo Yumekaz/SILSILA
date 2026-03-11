@@ -6,8 +6,11 @@ Helpers for serializing callback state into stable Dash store payloads.
 
 from __future__ import annotations
 
+from io import StringIO
 import json
 from types import SimpleNamespace
+
+import pandas as pd
 
 
 def event_direction(graph, flight_id: str) -> str:
@@ -50,21 +53,47 @@ def deserialize_cascade_store(cascade_store: str | None) -> dict | None:
 
 
 def serialize_recovery_options(options) -> str:
-    """Reduce recovery options to a stable, exportable JSON payload."""
+    """Reduce recovery options to a stable payload reusable by UI and export flows."""
     payload = [
         {
             "strategy": option.strategy,
             "label": option.label,
+            "description": option.description,
             "feasible": option.feasible,
+            "infeasibility_reason": option.infeasibility_reason,
+            "baseline_delay_min": option.baseline_delay_min,
+            "recovered_delay_min": option.recovered_delay_min,
             "delay_reduction_min": option.delay_reduction_min,
             "delay_reduction_pct": option.delay_reduction_pct,
+            "baseline_pax_affected": option.baseline_pax_affected,
+            "recovered_pax_affected": option.recovered_pax_affected,
             "direct_cost_usd": option.direct_cost_usd,
             "net_cost_usd": option.net_cost_usd,
             "pax_saved": option.pax_saved,
+            "pax_stranded": option.pax_stranded,
             "score": option.score,
             "pareto_efficient": option.pareto_efficient,
             "recommendation": option.recommendation,
             "objective_score": getattr(option, "objective_score", None),
+            "action_log": list(option.action_log),
+            "residual_events": [
+                {
+                    "flight_id": event.flight_id,
+                    "delay_min": event.delay_min,
+                    "edge_type": event.edge_type,
+                    "caused_by": event.caused_by,
+                    "propagation_path": event.propagation_path,
+                    "pax_affected": event.pax_affected,
+                    "pax_stranded": event.pax_stranded,
+                    "cost_usd": event.cost_usd,
+                    "severity": event.severity,
+                }
+                for event in option.residual_events
+            ],
+            "df_recovered": (
+                option.df_recovered.to_json(orient="records", date_format="iso")
+                if option.df_recovered is not None else None
+            ),
         }
         for option in options
     ]
@@ -80,6 +109,55 @@ def deserialize_recovery_store(recovery_store: str | None) -> list[dict]:
     except (TypeError, json.JSONDecodeError):
         return []
     return payload if isinstance(payload, list) else []
+
+
+def deserialize_recovery_option_frame(option_payload: dict | None):
+    """Rebuild a recovered schedule DataFrame from a serialized recovery payload."""
+    if not option_payload:
+        return None
+    frame_payload = option_payload.get("df_recovered")
+    if not frame_payload:
+        return None
+    try:
+        return pd.read_json(StringIO(frame_payload), orient="records")
+    except ValueError:
+        return None
+
+
+def serialize_mc_result(mc) -> str:
+    """Persist the Monte Carlo summary and risk profiles for reuse across callbacks."""
+    ns = mc.network_summary
+    payload = {
+        "n_scenarios": ns.n_scenarios,
+        "mean_flights_affected": ns.mean_flights_affected,
+        "p50_flights_affected": ns.p50_flights_affected,
+        "p90_flights_affected": ns.p90_flights_affected,
+        "p99_flights_affected": ns.p99_flights_affected,
+        "mean_cost_usd": ns.mean_cost_usd,
+        "p50_cost_usd": ns.p50_cost_usd,
+        "p90_cost_usd": ns.p90_cost_usd,
+        "p99_cost_usd": ns.p99_cost_usd,
+        "mean_total_delay": ns.mean_total_delay,
+        "p90_total_delay": ns.p90_total_delay,
+        "zero_cascade_pct": ns.zero_cascade_pct,
+        "critical_scenario_pct": ns.critical_scenario_pct,
+        "top_triggers": ns.top_triggers,
+        "risk_profiles": {
+            fid: {
+                "risk_label": profile.risk_label,
+                "risk_score": profile.risk_score,
+                "victim_probability": profile.victim_probability,
+                "trigger_avg_cascade": profile.trigger_avg_cascade,
+                "trigger_avg_cost": profile.trigger_avg_cost,
+                "direction": profile.direction,
+                "origin": profile.origin,
+                "destination": profile.destination,
+                "aircraft_type": profile.aircraft_type,
+            }
+            for fid, profile in mc.risk_profiles.items()
+        },
+    }
+    return json.dumps(payload)
 
 
 def deserialize_mc_store(mc_store: str | None):
@@ -121,4 +199,3 @@ def deserialize_mc_store(mc_store: str | None):
         cost_samples=[],
         n_scenarios=int(payload.get("n_scenarios", 0)),
     )
-
