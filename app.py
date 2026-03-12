@@ -16,7 +16,7 @@ import pandas as pd
 
 from engine.config import USE_OPENSKY_BY_DEFAULT
 from engine.data_loader import load_schedule
-from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
+from engine.cyto_graph import build_cyto_stylesheet
 from engine.graph_builder import build_graph, graph_summary
 from ui.callbacks import register_callbacks, register_phase3_callbacks
 from ui.layout import build_layout
@@ -62,7 +62,7 @@ def create_app(df: pd.DataFrame, graph):
             {"name": "viewport", "content": "width=device-width, initial-scale=1"}
         ],
     )
-    initial_graph_elements = build_cyto_elements(graph, df)
+    initial_graph_elements = []
     initial_graph_stylesheet = build_cyto_stylesheet()
     app.layout = build_layout(
         flight_options,

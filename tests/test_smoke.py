@@ -9,8 +9,9 @@ import pandas as pd
 import pytest
 
 import engine.data_loader as data_loader
-from app import build_flight_options
+from app import build_flight_options, create_app
 from engine.cascade import cascaded_schedule, run_cascade
+from engine.cyto_graph import build_cyto_elements
 from engine.data_loader import REQUIRED_COLUMNS, load_schedule
 from engine.graph_builder import build_graph, graph_summary
 from engine.monte_carlo import build_heatmap_data, run_monte_carlo
@@ -55,12 +56,41 @@ def test_flight_options_are_inbound_only(schedule_df):
     assert option_ids.isdisjoint(outbound_ids)
 
 
+def test_app_starts_with_graph_in_standby_mode(schedule_df, dependency_graph):
+    app = create_app(schedule_df, dependency_graph)
+    graph = app.layout.children[1].children[1].children[1].children[1]
+    empty_state = app.layout.children[1].children[1].children[1].children[0]
+
+    assert graph.elements == []
+    assert empty_state.style == {"display": "flex"}
+
+
 def test_graph_builds_and_has_core_edge_types(dependency_graph):
     summary = graph_summary(dependency_graph)
     assert summary["nodes"] > 0
     assert summary["edges"] > 0
     for edge_type in ("ROTATION", "PAX_CNXN", "CREW"):
         assert summary["edge_types"].get(edge_type, 0) >= 1
+
+
+def test_cyto_edges_are_only_dimmed_when_a_trigger_exists(schedule_df, dependency_graph):
+    plain_elements = build_cyto_elements(dependency_graph, schedule_df)
+    active_elements = build_cyto_elements(dependency_graph, schedule_df, "QR021", {"QR020"})
+
+    plain_edge_classes = {
+        element["classes"]
+        for element in plain_elements
+        if "source" in element["data"]
+    }
+    active_edge_classes = [
+        element["classes"]
+        for element in active_elements
+        if "source" in element["data"]
+    ]
+
+    assert all("edge-dimmed" not in classes for classes in plain_edge_classes)
+    assert any("edge-active" in classes for classes in active_edge_classes)
+    assert any("edge-dimmed" in classes for classes in active_edge_classes)
 
 
 def test_schedule_and_graph_validation_reports_pass(schedule_df, dependency_graph):

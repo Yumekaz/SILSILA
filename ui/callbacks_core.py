@@ -50,7 +50,7 @@ COLORS = {
 def register_callbacks(app, G, df):
     """Register live simulation and recovery callbacks."""
     cyto_stylesheet = build_cyto_stylesheet()
-    base_elements = build_cyto_elements(G, df)
+    empty_graph_elements = []
     COLORS["recovered"] = "#1A7A4A"
     COLORS["cancelled"] = "#4A1A2A"
 
@@ -140,6 +140,7 @@ def register_callbacks(app, G, df):
         Output("cascade-result-store", "data"),
         Output("network-graph", "elements", allow_duplicate=True),
         Output("network-graph", "stylesheet", allow_duplicate=True),
+        Output("graph-empty-state", "style"),
         Output("cascade-log", "children"),
         Output("affected-count", "children"),
         Output("gantt-chart", "figure"),
@@ -164,8 +165,9 @@ def register_callbacks(app, G, df):
         if triggered == "reset-btn":
             return (
                 None,
-                base_elements,
+                empty_graph_elements,
                 cyto_stylesheet,
+                {"display": "flex"},
                 _empty_log(),
                 "0 AFFECTED",
                 _build_gantt(df, None),
@@ -180,8 +182,9 @@ def register_callbacks(app, G, df):
         if not flight_id or not delay_min:
             return (
                 None,
-                base_elements,
+                empty_graph_elements,
                 cyto_stylesheet,
+                {"display": "flex"},
                 _empty_log(),
                 "0 AFFECTED",
                 _build_gantt(df, None),
@@ -199,6 +202,7 @@ def register_callbacks(app, G, df):
             serialize_cascade_result(bundle.cascade_result, G),
             build_cyto_elements(G, bundle.cascaded_df, flight_id, bundle.affected_ids),
             cyto_stylesheet,
+            {"display": "none"},
             _build_cascade_log(bundle.cascade_result),
             f"{bundle.cascade_result.flights_affected} AFFECTED",
             _build_gantt(bundle.cascaded_df, bundle.cascade_result),
@@ -214,6 +218,7 @@ def register_callbacks(app, G, df):
         Output("cascade-result-store", "data", allow_duplicate=True),
         Output("network-graph", "elements", allow_duplicate=True),
         Output("network-graph", "stylesheet", allow_duplicate=True),
+        Output("graph-empty-state", "style", allow_duplicate=True),
         Output("cascade-log", "children", allow_duplicate=True),
         Output("affected-count", "children", allow_duplicate=True),
         Output("gantt-chart", "figure", allow_duplicate=True),
@@ -235,8 +240,9 @@ def register_callbacks(app, G, df):
             raise PreventUpdate
         return (
             None,
-            base_elements,
+            empty_graph_elements,
             cyto_stylesheet,
+            {"display": "flex"},
             _empty_log(),
             "0 AFFECTED",
             _build_gantt(df, None),
@@ -251,7 +257,7 @@ def register_callbacks(app, G, df):
     @app.callback(
         Output("gantt-chart", "figure", allow_duplicate=True),
         Output("network-graph", "elements", allow_duplicate=True),
-        Output("selected-recovery-store", "data"),
+        Output("selected-recovery-store", "data", allow_duplicate=True),
         Input({"type": "recovery-select-btn", "index": 0}, "n_clicks"),
         Input({"type": "recovery-select-btn", "index": 1}, "n_clicks"),
         Input({"type": "recovery-select-btn", "index": 2}, "n_clicks"),

@@ -162,6 +162,8 @@ def build_cyto_elements(
         if trigger_id and (u == trigger_id or v == trigger_id or
                            u in affected_ids or v in affected_ids):
             edge_class += " edge-active"
+        elif trigger_id:
+            edge_class += " edge-dimmed"
 
         elements.append({
             "data": {
@@ -294,12 +296,12 @@ def build_cyto_stylesheet() -> list:
         {
             "selector": "edge",
             "style": {
-                "width":               1.5,
-                "opacity":             0.20,
+                "width":               1.8,
+                "opacity":             0.42,
                 "line-color":          C["border"],
                 "target-arrow-shape":  "triangle",
                 "target-arrow-color":  C["border"],
-                "arrow-scale":         0.8,
+                "arrow-scale":         0.95,
                 "curve-style":         "bezier",
                 "control-point-step-size": 40,
                 "transition-property": "opacity line-color",
@@ -336,16 +338,16 @@ def build_cyto_stylesheet() -> list:
         {
             "selector": "edge.edge-active",
             "style": {
-                "opacity":  0.90,
-                "width":    2.5,
+                "opacity":  1.0,
+                "width":    2.8,
                 "z-index":  30,
             },
         },
-        # ── Inactive edges when cascade is active ─────────────────────────────
         {
-            "selector": "edge:not(.edge-active)",
+            "selector": "edge.edge-dimmed",
             "style": {
                 "opacity": 0.12,
+                "width":   1.2,
             },
         },
         # ── Edge hover ────────────────────────────────────────────────────────

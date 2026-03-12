@@ -165,6 +165,7 @@ def build_control_panel(flight_options: list) -> html.Div:
 # ─── Center: Network Graph ────────────────────────────────────────────────────
 
 def build_network_panel(initial_elements: list | None = None, initial_stylesheet: list | None = None) -> html.Div:
+    has_graph = bool(initial_elements)
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("DOH HUB DEPENDENCY GRAPH", className="panel-title"),
@@ -186,6 +187,24 @@ def build_network_panel(initial_elements: list | None = None, initial_stylesheet
             ]),
         ]),
         html.Div(className="graph-container", children=[
+            html.Div(
+                id="graph-empty-state",
+                className="graph-empty-state",
+                style={"display": "none" if has_graph else "flex"},
+                children=[
+                    html.Div(className="graph-empty-card", children=[
+                        html.Div("NETWORK STANDBY", className="graph-empty-title"),
+                        html.Div(
+                            "Select an inbound trigger flight and click SIMULATE CASCADE to render the impacted dependency paths.",
+                            className="graph-empty-body",
+                        ),
+                        html.Div(
+                            "The underlying hub network changes by flight selection, but highlighted links only appear after a simulated trigger.",
+                            className="graph-empty-caption",
+                        ),
+                    ]),
+                ],
+            ),
             cyto.Cytoscape(
                 id="network-graph",
                 layout={"name": "preset"},

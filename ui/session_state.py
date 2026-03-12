@@ -134,7 +134,14 @@ def deserialize_recovery_option_frame(option_payload: dict | None):
     if not frame_payload:
         return None
     try:
-        return pd.read_json(StringIO(frame_payload), orient="records")
+        df = pd.read_json(StringIO(frame_payload), orient="records")
+        # JSON round-trip converts datetime columns to ISO strings;
+        # restore them to proper Timestamps so downstream code (e.g.
+        # _build_gantt) can do arithmetic like (end - start).total_seconds().
+        for col in ("arr_scheduled", "arr_actual", "dep_scheduled", "dep_actual"):
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
+        return df
     except ValueError:
         return None
 
