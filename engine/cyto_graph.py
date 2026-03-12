@@ -220,11 +220,6 @@ def build_cyto_stylesheet() -> list:
                 "color":            C["bg_1"],
                 "font-size":        13,
                 "z-index":          50,
-                "shadow-blur":      20,
-                "shadow-color":     C["cyan"],
-                "shadow-offset-x":  0,
-                "shadow-offset-y":  0,
-                "shadow-opacity":   0.7,
             },
         },
         {
@@ -233,11 +228,6 @@ def build_cyto_stylesheet() -> list:
                 "background-color": C["red"],
                 "border-color":     C["red"],
                 "color":            C["text_1"],
-                "shadow-blur":      14,
-                "shadow-color":     C["red"],
-                "shadow-offset-x":  0,
-                "shadow-offset-y":  0,
-                "shadow-opacity":   0.5,
             },
         },
         {
