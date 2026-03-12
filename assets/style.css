@@ -190,6 +190,14 @@ body {
   color: #95abcf;
 }
 
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .panel-badge {
   font-family: var(--font-data);
   font-size: 10px;

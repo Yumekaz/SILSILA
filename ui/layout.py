@@ -169,7 +169,7 @@ def build_network_panel(initial_elements: list | None = None, initial_stylesheet
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("DOH HUB DEPENDENCY GRAPH", className="panel-title"),
-            html.Div([
+            html.Div(className="panel-header-actions", children=[
                 html.Span("▸ ROTATION", className="tag",
                           style={"color": "#00C8FF", "borderColor": "#006A87",
                                  "background": "rgba(0,200,255,0.07)", "marginRight": "6px"}),
@@ -266,7 +266,7 @@ def build_recovery_panel() -> html.Div:
     return html.Div(className="recovery-panel", id="recovery-panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("RECOVERY OPTIONS", className="panel-title"),
-            html.Div([
+            html.Div(className="panel-header-actions", children=[
                 html.Span("RECOVERY", className="panel-badge",
                           style={"marginRight": "6px"}),
                 html.Span("AWAITING CASCADE", className="panel-badge",
@@ -295,7 +295,7 @@ def build_monte_carlo_panel() -> html.Div:
     return html.Div(className="mc-panel", id="mc-panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("MONTE CARLO RISK ANALYSIS", className="panel-title"),
-            html.Div([
+            html.Div(className="panel-header-actions", children=[
                 html.Span("RISK LAB", className="panel-badge", style={"marginRight": "6px"}),
                 html.Span(f"{MC_SCENARIOS} SCENARIOS", className="panel-badge",
                           style={"marginRight": "6px"}),
@@ -334,7 +334,7 @@ def build_sensitivity_panel() -> html.Div:
     return html.Div(className="mc-panel", id="sensitivity-panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("TURNAROUND SENSITIVITY ANALYSIS", className="panel-title"),
-            html.Div([
+            html.Div(className="panel-header-actions", children=[
                 html.Span("SENSITIVITY", className="panel-badge", style={"marginRight": "6px"}),
                 html.Button(
                     "▶  RUN SENSITIVITY",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ import pytest
 import engine.data_loader as data_loader
 from app import build_flight_options, create_app
 from engine.cascade import cascaded_schedule, run_cascade
-from engine.cyto_graph import build_cyto_elements
+from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
 from engine.data_loader import REQUIRED_COLUMNS, load_schedule
 from engine.graph_builder import build_graph, graph_summary
 from engine.monte_carlo import build_heatmap_data, run_monte_carlo
@@ -65,6 +66,20 @@ def test_app_starts_with_graph_in_standby_mode(schedule_df, dependency_graph):
     assert empty_state.style == {"display": "flex"}
 
 
+def test_panel_headers_wrap_actions_in_flex_containers(schedule_df, dependency_graph):
+    app = create_app(schedule_df, dependency_graph)
+
+    headers = [
+        app.layout.children[1].children[1].children[0],
+        app.layout.children[2].children[0],
+        app.layout.children[4].children[0],
+        app.layout.children[5].children[0],
+    ]
+
+    for header in headers:
+        assert header.children[1].className == "panel-header-actions"
+
+
 def test_graph_builds_and_has_core_edge_types(dependency_graph):
     summary = graph_summary(dependency_graph)
     assert summary["nodes"] > 0
@@ -91,6 +106,17 @@ def test_cyto_edges_are_only_dimmed_when_a_trigger_exists(schedule_df, dependenc
     assert all("edge-dimmed" not in classes for classes in plain_edge_classes)
     assert any("edge-active" in classes for classes in active_edge_classes)
     assert any("edge-dimmed" in classes for classes in active_edge_classes)
+
+
+def test_cyto_stylesheet_avoids_unsupported_selectors_and_shadow_props():
+    stylesheet = build_cyto_stylesheet()
+    selectors = {rule["selector"] for rule in stylesheet}
+    stylesheet_json = json.dumps(stylesheet)
+
+    assert "edge.edge-dimmed" in selectors
+    assert "edge:not(.edge-active)" not in selectors
+    assert "shadow-blur" not in stylesheet_json
+    assert "shadow-color" not in stylesheet_json
 
 
 def test_schedule_and_graph_validation_reports_pass(schedule_df, dependency_graph):
