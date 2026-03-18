@@ -10,6 +10,16 @@ env/
 # Dash/Plotly
 .hypothesis/
 .pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Python Tooling
+.mypy_cache/
+.ruff_cache/
+.nox/
+.tox/
+.cache/
 
 # OS
 .DS_Store
@@ -28,9 +38,19 @@ logs/
 
 # Runtime persistence
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 *.sqlite
 *.sqlite3
 data/runtime/
+
+# Local diagnostics
+diag-*.db
+smoke-*.db
+*.pid
+
+# Browser automation
 .selenium-cache/
 .selenium-profile/
 .selenium-profile-debug/
