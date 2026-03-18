@@ -984,3 +984,134 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.header-indicators {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.comparison-strip {
+  border-top: 1px solid var(--border-soft);
+  padding: 10px;
+}
+
+.comparison-empty {
+  color: var(--text-3);
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.comparison-strip-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.comparison-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.workflow-toolbar {
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px;
+  padding: 12px;
+  align-items: start;
+}
+
+.workflow-status-block {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.workflow-state-badge {
+  display: inline-block;
+  margin-top: 2px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--cyan);
+}
+
+.workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-btn {
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.workflow-btn:hover {
+  border-color: var(--text-2);
+  color: var(--text-1);
+  background: rgba(140, 160, 192, 0.06);
+}
+
+.workflow-btn-accept {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.workflow-btn-accept:hover {
+  background: rgba(0, 212, 160, 0.09);
+}
+
+.workflow-btn-override {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.workflow-btn-override:hover {
+  background: rgba(255, 107, 53, 0.09);
+}
+
+.workflow-note {
+  grid-column: 1 / -1;
+  color: var(--text-3);
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+@media (max-width: 1200px) {
+  .comparison-strip-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .workflow-toolbar {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 800px) {
+  .comparison-strip-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-actions {
+    flex-direction: column;
+  }
+}

@@ -23,12 +23,27 @@ def _label(text: str) -> html.Div:
     return html.Div(text, className="control-label")
 
 
+
+def _status_color(status: str) -> str:
+    status = (status or "").upper()
+    if status in {"NOMINAL", "HIGH", "LIVE"}:
+        return "#00D4A0"
+    if status in {"PARTIAL", "MEDIUM", "HYBRID", "RECOMMENDED", "REVIEWED"}:
+        return "#E8A020"
+    if status in {"DEGRADED", "LOW", "OVERRIDDEN"}:
+        return "#FF6B35"
+    if status in {"FAILED", "ACCEPTED"}:
+        return "#FF3D5A"
+    return "#8CA0C0"
+
+
+
 def empty_network_fig() -> go.Figure:
     """Blank network canvas — replaced by callback."""
     fig = go.Figure()
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor ="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=0, r=0, t=0, b=0),
         showlegend=False,
         xaxis=dict(visible=False, showgrid=False, zeroline=False),
@@ -37,11 +52,12 @@ def empty_network_fig() -> go.Figure:
     return fig
 
 
+
 def empty_gantt_fig() -> go.Figure:
     fig = go.Figure()
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor ="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=120, r=20, t=10, b=40),
         font=dict(family="JetBrains Mono", color="#8CA0C0", size=11),
         xaxis=dict(
@@ -55,7 +71,8 @@ def empty_gantt_fig() -> go.Figure:
 
 # ─── Header ───────────────────────────────────────────────────────────────────
 
-def build_header(data_source_label: str) -> html.Div:
+def build_header(data_source_label: str, data_health_label: str, ops_mode_label: str) -> html.Div:
+    data_health_color = _status_color(data_health_label)
     return html.Div(className="app-header", children=[
         html.Div(className="header-brand", children=[
             html.Div(className="brand-title", children=[
@@ -75,13 +92,20 @@ def build_header(data_source_label: str) -> html.Div:
                 ]),
             ]),
             html.Div(className="indicator", children=[
-                html.Div("LOCAL TIME (AST)", className="ind-label"),
-                html.Div("—:—", id="live-clock", className="ind-value"),
+                html.Div("DATA HEALTH", className="ind-label"),
+                html.Div(data_health_label, className="ind-value", style={"color": data_health_color}),
             ]),
             html.Div(className="indicator", children=[
                 html.Div("DATA SOURCE", className="ind-label"),
-                html.Div(data_source_label, className="ind-value",
-                         style={"fontSize": "11px"}),
+                html.Div(data_source_label, className="ind-value", style={"fontSize": "11px"}),
+            ]),
+            html.Div(className="indicator", children=[
+                html.Div("OPS MODE", className="ind-label"),
+                html.Div(ops_mode_label, className="ind-value", style={"fontSize": "11px", "color": "#8CA0C0"}),
+            ]),
+            html.Div(className="indicator", children=[
+                html.Div("LOCAL TIME (AST)", className="ind-label"),
+                html.Div("—:—", id="live-clock", className="ind-value"),
             ]),
         ]),
         dcc.Interval(id="clock-interval", interval=1000, n_intervals=0),
@@ -98,7 +122,6 @@ def build_control_panel(flight_options: list) -> html.Div:
         ]),
         html.Div(className="panel-body", children=[
 
-            # ── Flight selector ──────────────────────────────────────────────
             html.Div(className="control-section", children=[
                 _label("SELECT TRIGGER FLIGHT"),
                 dcc.Dropdown(
@@ -120,7 +143,6 @@ def build_control_panel(flight_options: list) -> html.Div:
 
             html.Div(className="divider"),
 
-            # ── Delay slider ─────────────────────────────────────────────────
             html.Div(className="control-section", children=[
                 _label("DELAY MAGNITUDE"),
                 html.Div("30 min", id="delay-display", className="delay-display"),
@@ -140,7 +162,6 @@ def build_control_panel(flight_options: list) -> html.Div:
 
             html.Div(className="divider"),
 
-            # ── Action buttons ───────────────────────────────────────────────
             html.Button(
                 "▶  SIMULATE CASCADE",
                 id="trigger-btn",
@@ -155,8 +176,6 @@ def build_control_panel(flight_options: list) -> html.Div:
             ),
 
             html.Div(className="divider"),
-
-            # ── Summary metrics (post-cascade) ───────────────────────────────
             html.Div(id="summary-metrics"),
         ]),
     ])
@@ -179,7 +198,6 @@ def build_network_panel(initial_elements: list | None = None, initial_stylesheet
                 html.Span("▸ PAX CNX", className="tag",
                           style={"color": "#E8A020", "borderColor": "#9B6B14",
                                  "background": "rgba(232,160,32,0.07)", "marginRight": "10px"}),
-                # Node info tooltip (populated on click)
                 html.Span(id="cyto-node-info", style={
                     "fontFamily": "JetBrains Mono", "fontSize": "10px",
                     "color": "#4A6080", "letterSpacing": "0.05em"
@@ -208,8 +226,7 @@ def build_network_panel(initial_elements: list | None = None, initial_stylesheet
             cyto.Cytoscape(
                 id="network-graph",
                 layout={"name": "preset"},
-                style={"height": "100%", "width": "100%",
-                       "background": "#06090F"},
+                style={"height": "100%", "width": "100%", "background": "#06090F"},
                 elements=initial_elements or [],
                 stylesheet=initial_stylesheet or [],
                 userZoomingEnabled=True,
@@ -261,16 +278,14 @@ def build_gantt_panel() -> html.Div:
     ])
 
 
+
 def build_recovery_panel() -> html.Div:
-    """Phase 2: Recovery options comparison panel — shown after cascade simulation."""
     return html.Div(className="recovery-panel", id="recovery-panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("RECOVERY OPTIONS", className="panel-title"),
             html.Div(className="panel-header-actions", children=[
-                html.Span("RECOVERY", className="panel-badge",
-                          style={"marginRight": "6px"}),
-                html.Span("AWAITING CASCADE", className="panel-badge",
-                          id="recovery-status-badge"),
+                html.Span("RECOVERY", className="panel-badge", style={"marginRight": "6px"}),
+                html.Span("AWAITING CASCADE", className="panel-badge", id="recovery-status-badge"),
             ]),
         ]),
         html.Div(
@@ -281,40 +296,46 @@ def build_recovery_panel() -> html.Div:
                     html.Div("◈", className="icon"),
                     html.Div("RUN SIMULATION FIRST"),
                     html.Div("Recovery options appear after cascade analysis",
-                             style={"opacity": "0.5", "textTransform": "none",
-                                    "letterSpacing": "0"}),
+                             style={"opacity": "0.5", "textTransform": "none", "letterSpacing": "0"}),
                 ])
             ]
         ),
         html.Div(id="optimizer-summary", className="mc-network-stats"),
+        html.Div(id="recovery-comparison-strip", className="comparison-strip", children=[
+            html.Div(className="comparison-empty", children="No recovery option selected yet.")
+        ]),
+        html.Div(className="workflow-toolbar", children=[
+            html.Div(className="workflow-status-block", children=[
+                html.Div("SCENARIO STATE", className="control-label"),
+                html.Div("AWAITING CASCADE", id="operator-state-badge", className="workflow-state-badge"),
+            ]),
+            html.Div(className="workflow-actions", children=[
+                html.Button("MARK REVIEWED", id="mark-reviewed-btn", className="workflow-btn", n_clicks=0),
+                html.Button("ACCEPT PLAN", id="accept-plan-btn", className="workflow-btn workflow-btn-accept", n_clicks=0),
+                html.Button("OVERRIDE", id="override-plan-btn", className="workflow-btn workflow-btn-override", n_clicks=0),
+            ]),
+            html.Div(
+                "Run a simulation to create an auditable scenario.",
+                id="workflow-activity-note",
+                className="workflow-note",
+            ),
+        ]),
     ])
 
 
+
 def build_monte_carlo_panel() -> html.Div:
-    """Phase 3: Monte Carlo risk panel with heatmap and distribution charts."""
     return html.Div(className="mc-panel", id="mc-panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("MONTE CARLO RISK ANALYSIS", className="panel-title"),
             html.Div(className="panel-header-actions", children=[
                 html.Span("RISK LAB", className="panel-badge", style={"marginRight": "6px"}),
-                html.Span(f"{MC_SCENARIOS} SCENARIOS", className="panel-badge",
-                          style={"marginRight": "6px"}),
-                html.Button(
-                    "▶  RUN MONTE CARLO",
-                    id="mc-run-btn",
-                    className="mc-run-btn",
-                    n_clicks=0,
-                ),
-                html.Button(
-                    "⬇  EXPORT PDF",
-                    id="pdf-export-btn",
-                    className="mc-export-btn",
-                    n_clicks=0,
-                ),
+                html.Span(f"{MC_SCENARIOS} SCENARIOS", className="panel-badge", style={"marginRight": "6px"}),
+                html.Button("▶  RUN MONTE CARLO", id="mc-run-btn", className="mc-run-btn", n_clicks=0),
+                html.Button("⬇  EXPORT PDF", id="pdf-export-btn", className="mc-export-btn", n_clicks=0),
                 dcc.Download(id="pdf-download"),
             ]),
         ]),
-        # Progress / status bar
         html.Div(id="mc-status-bar", className="mc-status-bar", children=[
             html.Div(className="log-empty", style={"height": "60px"}, children=[
                 html.Div("◈", className="icon"),
@@ -322,26 +343,19 @@ def build_monte_carlo_panel() -> html.Div:
                          style={"textTransform": "none", "letterSpacing": "0"}),
             ])
         ]),
-        # Charts row
         html.Div(className="mc-charts-grid", id="mc-charts", children=[]),
-        # Network summary stats
         html.Div(id="mc-network-stats", className="mc-network-stats"),
     ])
 
 
+
 def build_sensitivity_panel() -> html.Div:
-    """Turnaround sensitivity analysis panel."""
     return html.Div(className="mc-panel", id="sensitivity-panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("TURNAROUND SENSITIVITY ANALYSIS", className="panel-title"),
             html.Div(className="panel-header-actions", children=[
                 html.Span("SENSITIVITY", className="panel-badge", style={"marginRight": "6px"}),
-                html.Button(
-                    "▶  RUN SENSITIVITY",
-                    id="sensitivity-run-btn",
-                    className="mc-run-btn",
-                    n_clicks=0,
-                ),
+                html.Button("▶  RUN SENSITIVITY", id="sensitivity-run-btn", className="mc-run-btn", n_clicks=0),
             ]),
         ]),
         html.Div(id="sensitivity-status-bar", className="mc-status-bar", children=[
@@ -370,11 +384,13 @@ def build_sensitivity_panel() -> html.Div:
 def build_layout(
     flight_options: list,
     data_source_label: str,
+    data_health_label: str,
+    ops_mode_label: str,
     initial_graph_elements: list | None = None,
     initial_graph_stylesheet: list | None = None,
 ) -> html.Div:
     return html.Div([
-        build_header(data_source_label),
+        build_header(data_source_label, data_health_label, ops_mode_label),
         html.Div(className="main-grid", children=[
             build_control_panel(flight_options),
             build_network_panel(initial_graph_elements, initial_graph_stylesheet),
@@ -384,11 +400,11 @@ def build_layout(
         build_gantt_panel(),
         build_monte_carlo_panel(),
         build_sensitivity_panel(),
-
-        # Hidden stores
         dcc.Store(id="cascade-result-store"),
         dcc.Store(id="schedule-store"),
         dcc.Store(id="recovery-options-store"),
         dcc.Store(id="selected-recovery-store"),
         dcc.Store(id="mc-result-store"),
+        dcc.Store(id="scenario-id-store"),
+        dcc.Store(id="operator-state-store"),
     ])

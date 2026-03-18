@@ -6,23 +6,19 @@ Monte Carlo analysis and PDF export callbacks.
 
 from __future__ import annotations
 
-import os
-import tempfile
-
 from dash import Input, Output, State, dcc
 from dash.exceptions import PreventUpdate
 
 from engine.config import MC_SCENARIOS
 from engine.monte_carlo import run_monte_carlo
-from engine.pdf_report import generate_pdf_report
 from engine.sensitivity import run_turnaround_sensitivity
 from ui.analysis_views import build_monte_carlo_outputs, build_sensitivity_outputs
 from ui.callbacks_core import COLORS
-from ui.session_state import deserialize_mc_store
 from ui.workflows import prepare_pdf_export_bundle
 
 
-def register_phase3_callbacks(app, G, df):
+
+def register_phase3_callbacks(app, G, df, platform=None):
     """Register Monte Carlo and export callbacks."""
 
     @app.callback(
@@ -37,7 +33,7 @@ def register_phase3_callbacks(app, G, df):
         if not n_clicks:
             raise PreventUpdate
 
-        mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
+        mc = platform.run_monte_carlo_sync(n_scenarios=MC_SCENARIOS) if platform is not None else run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
         return build_monte_carlo_outputs(mc, G, COLORS)
 
     @app.callback(
@@ -53,12 +49,15 @@ def register_phase3_callbacks(app, G, df):
         if not n_clicks or not flight_id or not delay_min:
             raise PreventUpdate
 
-        points = run_turnaround_sensitivity(
-            df,
-            trigger_ids=[flight_id],
-            trigger_delay_min=float(delay_min),
-            min_turnaround_values=[35.0, 45.0, 55.0, 65.0],
-        )
+        if platform is not None:
+            points = platform.run_sensitivity_sync(flight_id=flight_id, delay_min=float(delay_min))
+        else:
+            points = run_turnaround_sensitivity(
+                df,
+                trigger_ids=[flight_id],
+                trigger_delay_min=float(delay_min),
+                min_turnaround_values=[35.0, 45.0, 55.0, 65.0],
+            )
         return build_sensitivity_outputs(points, flight_id, float(delay_min), COLORS)
 
     @app.callback(
@@ -78,6 +77,17 @@ def register_phase3_callbacks(app, G, df):
         if not flight_id or not delay_min:
             raise PreventUpdate
 
+        if platform is not None:
+            pdf_bytes, filename = platform.generate_pdf_bytes(
+                flight_id=flight_id,
+                delay_min=float(delay_min),
+                cascade_store=cascade_store,
+                recovery_store=recovery_store,
+                selected_recovery_store=selected_recovery_store,
+                mc_store=mc_store,
+            )
+            return dcc.send_bytes(pdf_bytes, filename=filename)
+
         export_bundle = prepare_pdf_export_bundle(
             G,
             df,
@@ -87,14 +97,13 @@ def register_phase3_callbacks(app, G, df):
             recovery_store,
             selected_recovery_store,
         )
-
-        mc = deserialize_mc_store(mc_store)
-        if mc is None:
-            mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
+        mc = run_monte_carlo(G, df, n_scenarios=MC_SCENARIOS)
+        from engine.pdf_report import generate_pdf_report
+        import os
+        import tempfile
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             path = tmp.name
-
         generate_pdf_report(export_bundle.cascade_payload, export_bundle.recovery_payload, mc, path)
         with open(path, "rb") as handle:
             pdf_bytes = handle.read()

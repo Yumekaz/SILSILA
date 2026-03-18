@@ -242,12 +242,23 @@ The repository includes:
 - [`render.yaml`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/render.yaml)
 - [`Procfile`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/Procfile)
 - [`runtime.txt`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/runtime.txt)
+- [`gunicorn.conf.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/gunicorn.conf.py)
 
 The current server entrypoint is:
 
 ```bash
-gunicorn server:server
+gunicorn server:server --config gunicorn.conf.py
 ```
+
+Recommended platform: `Render`.
+
+Current deployment shape:
+
+- Render web service
+- persistent disk mounted at `/var/data`
+- SQLite runtime database at `/var/data/silsila_ops.db`
+- health checks via `/healthz`
+- single-instance Gunicorn process with threaded workers
 
 ## Limitations
 

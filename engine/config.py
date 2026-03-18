@@ -4,15 +4,31 @@ config.py
 Centralized configuration constants for the SILSILA cascade engine.
 """
 
+import os
+
 from engine.cost_model import (
     CALIBRATED_AIRCRAFT_DELAY_COST_USD_PER_MIN,
     CALIBRATED_PASSENGER_DELAY_COST_USD_PER_MIN,
 )
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 # -- API & Data Constants -------------------------------------------------------
 OTHH = "OTHH"
 OPENSKY_URL = "https://opensky-network.org/api/flights/arrival"
-USE_OPENSKY_BY_DEFAULT = False
+USE_OPENSKY_BY_DEFAULT = _env_bool("SILSILA_USE_OPENSKY_BY_DEFAULT", False)
+OPENSKY_TIMEOUT_SECONDS = 10
+OPENSKY_MAX_RETRIES = 2
+OPENSKY_RETRY_BACKOFF_SECONDS = 1.25
+OPENSKY_CIRCUIT_FAILURE_THRESHOLD = 3
+OPENSKY_CIRCUIT_RESET_SECONDS = 300
+DATA_FRESHNESS_WARN_SECONDS = 15 * 60
+DATA_FRESHNESS_DEGRADE_SECONDS = 60 * 60
 
 # -- Operational Constraints (Minutes) ------------------------------------------
 MIN_TURNAROUND_MINUTES = 45

@@ -7,6 +7,8 @@ Primary:   OpenSky Network REST API (free, real historical data)
 Fallback:  Synthetic schedule built from real QR routes + realistic timing
 """
 
+from __future__ import annotations
+
 import warnings
 warnings.filterwarnings(
     "ignore",
@@ -14,16 +16,71 @@ warnings.filterwarnings(
     module="requests",
 )
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import time
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import requests
 
-from engine.config import MIN_TURNAROUND_MINUTES, OPENSKY_URL, OTHH
+from engine.config import (
+    DATA_FRESHNESS_DEGRADE_SECONDS,
+    DATA_FRESHNESS_WARN_SECONDS,
+    MIN_TURNAROUND_MINUTES,
+    OPENSKY_CIRCUIT_FAILURE_THRESHOLD,
+    OPENSKY_CIRCUIT_RESET_SECONDS,
+    OPENSKY_MAX_RETRIES,
+    OPENSKY_RETRY_BACKOFF_SECONDS,
+    OPENSKY_TIMEOUT_SECONDS,
+    OPENSKY_URL,
+    OTHH,
+)
 
 logger = logging.getLogger(__name__)
 REQUEST_HEADERS = {"User-Agent": "SILSILA/1.0 (educational ops simulator)"}
+RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+@dataclass
+class FeedCircuitBreaker:
+    failure_threshold: int
+    reset_timeout_s: int
+    failure_count: int = 0
+    opened_at: datetime | None = None
+
+    def allow_request(self, now: datetime) -> bool:
+        if self.opened_at is None:
+            return True
+        elapsed = (now - self.opened_at).total_seconds()
+        if elapsed >= self.reset_timeout_s:
+            self.opened_at = None
+            self.failure_count = 0
+            return True
+        return False
+
+    def record_success(self) -> None:
+        self.failure_count = 0
+        self.opened_at = None
+
+    def record_failure(self, now: datetime) -> None:
+        self.failure_count += 1
+        if self.failure_count >= self.failure_threshold:
+            self.opened_at = now
+
+    def state(self, now: datetime) -> str:
+        if self.opened_at is None:
+            return "CLOSED"
+        elapsed = (now - self.opened_at).total_seconds()
+        return "HALF_OPEN" if elapsed >= self.reset_timeout_s else "OPEN"
+
+
+_OPENSKY_CIRCUIT = FeedCircuitBreaker(
+    failure_threshold=OPENSKY_CIRCUIT_FAILURE_THRESHOLD,
+    reset_timeout_s=OPENSKY_CIRCUIT_RESET_SECONDS,
+)
+_LAST_FEED_METADATA: dict[str, Any] = {}
 
 # Real Qatar Airways fleet sample (tail -> aircraft type -> seats)
 QR_FLEET = {
@@ -39,8 +96,6 @@ QR_FLEET = {
 
 # One representative crew per aircraft (simplified - real ops has many)
 CREW_ASSIGNMENTS = {
-    # Intentionally shared across selected aircraft to create realistic
-    # cross-aircraft crew dependencies for cascade modeling.
     "A7-APA": "CREW-01",
     "A7-ALC": "CREW-01",
     "A7-BAA": "CREW-02",
@@ -157,6 +212,61 @@ REQUIRED_COLUMNS = {
 }
 
 
+def _ingestion_metadata(
+    *,
+    provider: str,
+    outcome: str,
+    mode: str,
+    attempts: int,
+    status_code: int | None = None,
+    error: str = "",
+    records_received: int = 0,
+    latency_ms: float = 0.0,
+    circuit_state: str = "CLOSED",
+    timeout_s: int = OPENSKY_TIMEOUT_SECONDS,
+    max_retries: int = OPENSKY_MAX_RETRIES,
+) -> dict[str, Any]:
+    return {
+        "provider": provider,
+        "outcome": outcome,
+        "mode": mode,
+        "attempts": attempts,
+        "status_code": status_code,
+        "error": error,
+        "records_received": records_received,
+        "latency_ms": round(float(latency_ms), 1),
+        "fetched_at": datetime.now(tz=timezone.utc).isoformat(),
+        "circuit_state": circuit_state,
+        "timeout_s": timeout_s,
+        "max_retries": max_retries,
+        "freshness_warn_s": DATA_FRESHNESS_WARN_SECONDS,
+        "freshness_degrade_s": DATA_FRESHNESS_DEGRADE_SECONDS,
+        "fallback_active": mode == "FALLBACK",
+    }
+
+
+
+def _remember_feed_metadata(meta: dict[str, Any]) -> None:
+    global _LAST_FEED_METADATA
+    _LAST_FEED_METADATA = dict(meta)
+
+
+
+def get_last_feed_metadata() -> dict[str, Any]:
+    return dict(_LAST_FEED_METADATA)
+
+
+
+def _stamp_schedule(df: pd.DataFrame, data_source: str, ingestion_meta: dict[str, Any], degraded_reasons: list[str] | None = None) -> pd.DataFrame:
+    df.attrs["data_source"] = data_source
+    df.attrs["ingestion_metadata"] = dict(ingestion_meta)
+    df.attrs["loaded_at"] = datetime.now(tz=timezone.utc).isoformat()
+    df.attrs["degraded_reasons"] = list(degraded_reasons or [])
+    df.attrs["fallback_active"] = bool(ingestion_meta.get("fallback_active", False))
+    return df
+
+
+
 def _fallback_for_open_sky(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize OpenSky arrivals-only payload into internal schema.
@@ -206,6 +316,7 @@ def _fallback_for_open_sky(df: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+
 def _schedule_is_usable(df: pd.DataFrame) -> bool:
     """Return True only if schedule supports dependency construction."""
     if df is None or df.empty:
@@ -217,8 +328,10 @@ def _schedule_is_usable(df: pd.DataFrame) -> bool:
     return bool(has_inbound and has_outbound)
 
 
+
 def _rotation_reference_time(row: pd.Series):
     return row["arr_actual"] if row["direction"] == "inbound" else row["dep_scheduled"]
+
 
 
 def _apply_turnaround_slack(df: pd.DataFrame) -> pd.DataFrame:
@@ -252,6 +365,7 @@ def _apply_turnaround_slack(df: pd.DataFrame) -> pd.DataFrame:
 
     df["turnaround_slack_min"] = df["turnaround_slack_min"].fillna(0.0)
     return df
+
 
 
 def _build_hybrid_schedule(opensky_df: pd.DataFrame, base_date: datetime) -> pd.DataFrame:
@@ -288,6 +402,79 @@ def _build_hybrid_schedule(opensky_df: pd.DataFrame, base_date: datetime) -> pd.
     return hybrid
 
 
+
+def _fetch_json_with_retries(url: str, params: dict[str, Any]) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
+    now = datetime.now(tz=timezone.utc)
+    if not _OPENSKY_CIRCUIT.allow_request(now):
+        meta = _ingestion_metadata(
+            provider="opensky",
+            outcome="CIRCUIT_OPEN",
+            mode="FALLBACK",
+            attempts=0,
+            error="OpenSky circuit breaker is open after repeated upstream failures.",
+            circuit_state=_OPENSKY_CIRCUIT.state(now),
+        )
+        _remember_feed_metadata(meta)
+        return None, meta
+
+    attempts = 0
+    last_error = ""
+    status_code = None
+    t0 = time.perf_counter()
+    session = requests.Session()
+    try:
+        for attempts in range(1, OPENSKY_MAX_RETRIES + 2):
+            try:
+                response = session.get(
+                    url,
+                    params=params,
+                    headers=REQUEST_HEADERS,
+                    timeout=OPENSKY_TIMEOUT_SECONDS,
+                )
+                status_code = response.status_code
+                if response.status_code in RETRIABLE_STATUS_CODES and attempts <= OPENSKY_MAX_RETRIES:
+                    time.sleep(OPENSKY_RETRY_BACKOFF_SECONDS * attempts)
+                    continue
+                response.raise_for_status()
+                payload = response.json()
+                meta = _ingestion_metadata(
+                    provider="opensky",
+                    outcome="SUCCESS" if payload else "EMPTY",
+                    mode="LIVE",
+                    attempts=attempts,
+                    status_code=status_code,
+                    records_received=len(payload or []),
+                    latency_ms=(time.perf_counter() - t0) * 1000,
+                    circuit_state=_OPENSKY_CIRCUIT.state(datetime.now(tz=timezone.utc)),
+                )
+                _OPENSKY_CIRCUIT.record_success()
+                _remember_feed_metadata(meta)
+                return payload, meta
+            except requests.RequestException as exc:
+                last_error = str(exc)
+                if attempts <= OPENSKY_MAX_RETRIES:
+                    time.sleep(OPENSKY_RETRY_BACKOFF_SECONDS * attempts)
+                    continue
+    finally:
+        session.close()
+
+    failure_now = datetime.now(tz=timezone.utc)
+    _OPENSKY_CIRCUIT.record_failure(failure_now)
+    meta = _ingestion_metadata(
+        provider="opensky",
+        outcome="ERROR",
+        mode="FALLBACK",
+        attempts=attempts,
+        status_code=status_code,
+        error=last_error,
+        latency_ms=(time.perf_counter() - t0) * 1000,
+        circuit_state=_OPENSKY_CIRCUIT.state(failure_now),
+    )
+    _remember_feed_metadata(meta)
+    return None, meta
+
+
+
 def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
     """
     Pull real arrival data from OpenSky Network for DOH.
@@ -297,46 +484,46 @@ def fetch_from_opensky(date: datetime) -> pd.DataFrame | None:
     start = int(date.replace(hour=0, minute=0, second=0, tzinfo=timezone.utc).timestamp())
     end = int(date.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc).timestamp())
 
-    try:
-        resp = requests.get(
-            OPENSKY_URL,
-            params={"airport": OTHH, "begin": start, "end": end},
-            headers=REQUEST_HEADERS,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        raw = resp.json()
-
-        if not raw:
-            return None
-
-        flights = []
-        for flight in raw:
-            callsign = (flight.get("callsign") or "").strip()
-            if not callsign.startswith("QTR"):
-                continue
-            flights.append(
-                {
-                    "flight_id": callsign,
-                    "callsign": callsign,
-                    "origin": flight.get("estDepartureAirport", "UNKN"),
-                    "destination": OTHH,
-                    "arr_scheduled": datetime.fromtimestamp(flight["lastSeen"], tz=timezone.utc),
-                    "arr_actual": datetime.fromtimestamp(flight["lastSeen"], tz=timezone.utc),
-                    "aircraft_reg": flight.get("icao24", "A7-UNK").upper(),
-                    "direction": "inbound",
-                }
-            )
-
-        if not flights:
-            return None
-        normalized = _fallback_for_open_sky(pd.DataFrame(flights))
-        normalized.attrs["data_source"] = "opensky-arrivals-partial"
-        return normalized
-
-    except Exception as exc:
-        logger.warning("OpenSky unavailable (%s). Using synthetic data.", exc)
+    raw, meta = _fetch_json_with_retries(
+        OPENSKY_URL,
+        {"airport": OTHH, "begin": start, "end": end},
+    )
+    if not raw:
+        if meta.get("outcome") == "ERROR":
+            logger.warning("OpenSky unavailable (%s). Using fallback schedule.", meta.get("error", "unknown error"))
+        elif meta.get("outcome") == "CIRCUIT_OPEN":
+            logger.warning("OpenSky circuit breaker open. Using fallback schedule.")
         return None
+
+    flights = []
+    for flight in raw:
+        callsign = (flight.get("callsign") or "").strip()
+        if not callsign.startswith("QTR"):
+            continue
+        flights.append(
+            {
+                "flight_id": callsign,
+                "callsign": callsign,
+                "origin": flight.get("estDepartureAirport", "UNKN"),
+                "destination": OTHH,
+                "arr_scheduled": datetime.fromtimestamp(flight["lastSeen"], tz=timezone.utc),
+                "arr_actual": datetime.fromtimestamp(flight["lastSeen"], tz=timezone.utc),
+                "aircraft_reg": flight.get("icao24", "A7-UNK").upper(),
+                "direction": "inbound",
+            }
+        )
+
+    if not flights:
+        empty_meta = dict(meta)
+        empty_meta["outcome"] = "EMPTY"
+        empty_meta["records_received"] = 0
+        _remember_feed_metadata(empty_meta)
+        return None
+
+    normalized = _fallback_for_open_sky(pd.DataFrame(flights))
+    normalized = _stamp_schedule(normalized, "opensky-arrivals-partial", meta)
+    return normalized
+
 
 
 def build_synthetic_schedule(base_date: datetime | None = None) -> pd.DataFrame:
@@ -437,8 +624,28 @@ def build_synthetic_schedule(base_date: datetime | None = None) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     df = _apply_turnaround_slack(df)
     df = df.reset_index(drop=True)
-    df.attrs["data_source"] = "synthetic-hub-schedule"
-    return df
+    synthetic_meta = _ingestion_metadata(
+        provider="synthetic",
+        outcome="SYNTHETIC",
+        mode="FALLBACK",
+        attempts=0,
+        records_received=len(df),
+        circuit_state=_OPENSKY_CIRCUIT.state(datetime.now(tz=timezone.utc)),
+    )
+    synthetic_meta["fallback_active"] = True
+    synthetic_meta["error"] = "Synthetic fallback schedule generated locally."
+    return _stamp_schedule(df, "synthetic-hub-schedule", synthetic_meta, degraded_reasons=["Synthetic fallback schedule is active."])
+
+
+
+def _complete_hybrid_ingestion_meta(base_meta: dict[str, Any], assigned: int) -> dict[str, Any]:
+    hybrid_meta = dict(base_meta)
+    hybrid_meta["outcome"] = "HYBRID"
+    hybrid_meta["mode"] = "HYBRID"
+    hybrid_meta["fallback_active"] = False
+    hybrid_meta["records_received"] = assigned
+    return hybrid_meta
+
 
 
 def load_schedule(date: datetime | None = None, use_opensky: bool = True) -> pd.DataFrame:
@@ -451,25 +658,40 @@ def load_schedule(date: datetime | None = None, use_opensky: bool = True) -> pd.
 
     if use_opensky:
         df = fetch_from_opensky(date)
+        ingestion_meta = (df.attrs.get("ingestion_metadata") if df is not None else None) or get_last_feed_metadata()
         if df is not None and len(df) > 5:
             if _schedule_is_usable(df):
                 logger.info("Loaded %d flights from OpenSky.", len(df))
-                df.attrs["data_source"] = df.attrs.get("data_source", "opensky")
-                return df
+                return _stamp_schedule(df, df.attrs.get("data_source", "opensky-arrivals-partial"), ingestion_meta)
 
             hybrid = _build_hybrid_schedule(df, date)
             if _schedule_is_usable(hybrid):
-                logger.info(
-                    "Blended %d OpenSky arrivals into the modeled hub schedule.",
-                    int((df["direction"] == "inbound").sum()),
+                assigned = int((df["direction"] == "inbound").sum())
+                logger.info("Blended %d OpenSky arrivals into the modeled hub schedule.", assigned)
+                hybrid_meta = _complete_hybrid_ingestion_meta(ingestion_meta, assigned)
+                return _stamp_schedule(
+                    hybrid,
+                    hybrid.attrs.get("data_source", f"opensky-hybrid-{assigned}-arrivals"),
+                    hybrid_meta,
+                    degraded_reasons=["Hybrid schedule blends authoritative arrivals with modeled downstream legs."],
                 )
-                return hybrid
 
-        if df is not None and len(df) > 0:
-            logger.info("OpenSky payload incomplete for a hybrid schedule. Using synthetic schedule.")
-        else:
-            logger.info("Using synthetic schedule.")
+        fallback_reasons = []
+        if ingestion_meta.get("error"):
+            fallback_reasons.append(ingestion_meta["error"])
+        if ingestion_meta.get("outcome") == "CIRCUIT_OPEN":
+            fallback_reasons.append("OpenSky circuit breaker open after repeated failures.")
+        if not fallback_reasons:
+            fallback_reasons.append("OpenSky data unavailable or incomplete; using synthetic schedule.")
+        logger.info("Using synthetic schedule.")
+        synthetic = build_synthetic_schedule(date)
+        synthetic_meta = dict(ingestion_meta) if ingestion_meta else synthetic.attrs.get("ingestion_metadata", {})
+        synthetic_meta.update({
+            "provider": synthetic_meta.get("provider", "opensky"),
+            "mode": "FALLBACK",
+            "fallback_active": True,
+        })
+        return _stamp_schedule(synthetic, "synthetic-hub-schedule", synthetic_meta, degraded_reasons=fallback_reasons)
 
     synthetic = build_synthetic_schedule(date)
-    synthetic.attrs["data_source"] = "synthetic-hub-schedule"
     return synthetic

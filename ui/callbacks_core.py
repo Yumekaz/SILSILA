@@ -7,14 +7,14 @@ Core Dash callbacks for live simulation, recovery, and shared figure builders.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 
 from dash import Input, Output, State, html
+from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 import pandas as pd
 
 from engine.cyto_graph import build_cyto_elements, build_cyto_stylesheet
-from dash.exceptions import PreventUpdate
-
 from ui.session_state import (
     cascade_store_matches_request,
     serialize_cascade_result,
@@ -47,7 +47,8 @@ COLORS = {
 }
 
 
-def register_callbacks(app, G, df):
+
+def register_callbacks(app, G, df, platform=None):
     """Register live simulation and recovery callbacks."""
     cyto_stylesheet = build_cyto_stylesheet()
     empty_graph_elements = []
@@ -101,26 +102,13 @@ def register_callbacks(app, G, df):
             ]),
             html.Div(
                 f"{origin} → {dest}",
-                style={"fontFamily": "JetBrains Mono", "fontSize": "12px",
-                       "color": COLORS["text_2"], "marginTop": "4px"},
+                style={"fontFamily": "JetBrains Mono", "fontSize": "12px", "color": COLORS["text_2"], "marginTop": "4px"},
             ),
             html.Div(className="flight-card-meta", children=[
-                html.Div(className="meta-item", children=[
-                    html.Div("AIRCRAFT", className="meta-key"),
-                    html.Div(data.get("aircraft_reg", "—"), className="meta-val"),
-                ]),
-                html.Div(className="meta-item", children=[
-                    html.Div("TYPE", className="meta-key"),
-                    html.Div(data.get("aircraft_type", "—"), className="meta-val"),
-                ]),
-                html.Div(className="meta-item", children=[
-                    html.Div("PAX ONBOARD", className="meta-key"),
-                    html.Div(f"{data.get('pax', 0):,}", className="meta-val"),
-                ]),
-                html.Div(className="meta-item", children=[
-                    html.Div("SCHED TIME", className="meta-key"),
-                    html.Div(time_str, className="meta-val"),
-                ]),
+                html.Div(className="meta-item", children=[html.Div("AIRCRAFT", className="meta-key"), html.Div(data.get("aircraft_reg", "—"), className="meta-val")]),
+                html.Div(className="meta-item", children=[html.Div("TYPE", className="meta-key"), html.Div(data.get("aircraft_type", "—"), className="meta-val")]),
+                html.Div(className="meta-item", children=[html.Div("PAX ONBOARD", className="meta-key"), html.Div(f"{data.get('pax', 0):,}", className="meta-val")]),
+                html.Div(className="meta-item", children=[html.Div("SCHED TIME", className="meta-key"), html.Div(time_str, className="meta-val")]),
                 html.Div(className="meta-item", children=[
                     html.Div("SLACK", className="meta-key"),
                     html.Div(
@@ -129,15 +117,14 @@ def register_callbacks(app, G, df):
                         style={"color": COLORS["gold"] if data.get("turnaround_slack_min", 999) < 30 else COLORS["text_2"]},
                     ),
                 ]),
-                html.Div(className="meta-item", children=[
-                    html.Div("CREW", className="meta-key"),
-                    html.Div(data.get("crew_id", "—"), className="meta-val"),
-                ]),
+                html.Div(className="meta-item", children=[html.Div("CREW", className="meta-key"), html.Div(data.get("crew_id", "—"), className="meta-val")]),
             ]),
         ])
 
     @app.callback(
         Output("cascade-result-store", "data"),
+        Output("scenario-id-store", "data"),
+        Output("operator-state-store", "data"),
         Output("network-graph", "elements", allow_duplicate=True),
         Output("network-graph", "stylesheet", allow_duplicate=True),
         Output("graph-empty-state", "style"),
@@ -147,6 +134,9 @@ def register_callbacks(app, G, df):
         Output("summary-metrics", "children"),
         Output("recovery-cards", "children"),
         Output("recovery-status-badge", "children"),
+        Output("recovery-comparison-strip", "children"),
+        Output("operator-state-badge", "children"),
+        Output("workflow-activity-note", "children"),
         Output("optimizer-summary", "children"),
         Output("recovery-options-store", "data"),
         Output("selected-recovery-store", "data"),
@@ -161,10 +151,14 @@ def register_callbacks(app, G, df):
 
         triggered = ctx.triggered_id
         empty_recovery = _empty_recovery_cards()
+        empty_comparison = _empty_comparison_strip()
+        awaiting_state = {"state": "AWAITING CASCADE"}
 
         if triggered == "reset-btn":
             return (
                 None,
+                None,
+                awaiting_state,
                 empty_graph_elements,
                 cyto_stylesheet,
                 {"display": "flex"},
@@ -174,6 +168,9 @@ def register_callbacks(app, G, df):
                 html.Div(),
                 empty_recovery,
                 "AWAITING CASCADE",
+                empty_comparison,
+                "AWAITING CASCADE",
+                "Scenario reset; audit trail preserved in backend history.",
                 html.Div(),
                 None,
                 None,
@@ -182,6 +179,8 @@ def register_callbacks(app, G, df):
         if not flight_id or not delay_min:
             return (
                 None,
+                None,
+                awaiting_state,
                 empty_graph_elements,
                 cyto_stylesheet,
                 {"display": "flex"},
@@ -191,24 +190,43 @@ def register_callbacks(app, G, df):
                 html.Div(),
                 empty_recovery,
                 "AWAITING CASCADE",
+                empty_comparison,
+                "AWAITING CASCADE",
+                "Select a flight and delay to create a replayable scenario.",
                 html.Div(),
                 None,
                 None,
             )
 
-        bundle = run_simulation_bundle(G, df, flight_id, float(delay_min))
+        if platform is not None:
+            execution = platform.run_simulation(flight_id, float(delay_min))
+            bundle = execution.bundle
+            confidence = execution.confidence
+            scenario_id = execution.scenario_id
+        else:
+            bundle = run_simulation_bundle(G, df, flight_id, float(delay_min))
+            confidence = None
+            scenario_id = None
+
+        operator_state = {"state": "SIMULATED"}
+        workflow_note = f"Scenario {scenario_id or 'local'} simulated and stored for review."
 
         return (
             serialize_cascade_result(bundle.cascade_result, G),
+            scenario_id,
+            operator_state,
             build_cyto_elements(G, bundle.cascaded_df, flight_id, bundle.affected_ids),
             cyto_stylesheet,
             {"display": "none"},
             _build_cascade_log(bundle.cascade_result),
             f"{bundle.cascade_result.flights_affected} AFFECTED",
             _build_gantt(bundle.cascaded_df, bundle.cascade_result),
-            _build_summary_metrics(bundle.cascade_result),
+            _build_summary_metrics(bundle.cascade_result, confidence=confidence, data_quality=getattr(platform, "data_quality", None)),
             _build_recovery_cards(bundle.recovery_options),
             f"{len([option for option in bundle.recovery_options if option.feasible])} OPTIONS READY",
+            empty_comparison,
+            "SIMULATED",
+            workflow_note,
             _build_optimizer_summary(bundle.optimization),
             serialize_recovery_options(bundle.recovery_options),
             None,
@@ -216,6 +234,8 @@ def register_callbacks(app, G, df):
 
     @app.callback(
         Output("cascade-result-store", "data", allow_duplicate=True),
+        Output("scenario-id-store", "data", allow_duplicate=True),
+        Output("operator-state-store", "data", allow_duplicate=True),
         Output("network-graph", "elements", allow_duplicate=True),
         Output("network-graph", "stylesheet", allow_duplicate=True),
         Output("graph-empty-state", "style", allow_duplicate=True),
@@ -225,6 +245,9 @@ def register_callbacks(app, G, df):
         Output("summary-metrics", "children", allow_duplicate=True),
         Output("recovery-cards", "children", allow_duplicate=True),
         Output("recovery-status-badge", "children", allow_duplicate=True),
+        Output("recovery-comparison-strip", "children", allow_duplicate=True),
+        Output("operator-state-badge", "children", allow_duplicate=True),
+        Output("workflow-activity-note", "children", allow_duplicate=True),
         Output("optimizer-summary", "children", allow_duplicate=True),
         Output("recovery-options-store", "data", allow_duplicate=True),
         Output("selected-recovery-store", "data", allow_duplicate=True),
@@ -238,8 +261,11 @@ def register_callbacks(app, G, df):
             raise PreventUpdate
         if cascade_store_matches_request(cascade_store, flight_id, delay_min):
             raise PreventUpdate
+        awaiting_state = {"state": "AWAITING CASCADE"}
         return (
             None,
+            None,
+            awaiting_state,
             empty_graph_elements,
             cyto_stylesheet,
             {"display": "flex"},
@@ -249,6 +275,9 @@ def register_callbacks(app, G, df):
             html.Div(),
             _empty_recovery_cards(),
             "AWAITING CASCADE",
+            _empty_comparison_strip(),
+            "AWAITING CASCADE",
+            "Active controls changed; previous scenario invalidated to avoid stale decisions.",
             html.Div(),
             None,
             None,
@@ -258,6 +287,10 @@ def register_callbacks(app, G, df):
         Output("gantt-chart", "figure", allow_duplicate=True),
         Output("network-graph", "elements", allow_duplicate=True),
         Output("selected-recovery-store", "data", allow_duplicate=True),
+        Output("recovery-comparison-strip", "children", allow_duplicate=True),
+        Output("operator-state-store", "data", allow_duplicate=True),
+        Output("operator-state-badge", "children", allow_duplicate=True),
+        Output("workflow-activity-note", "children", allow_duplicate=True),
         Input({"type": "recovery-select-btn", "index": 0}, "n_clicks"),
         Input({"type": "recovery-select-btn", "index": 1}, "n_clicks"),
         Input({"type": "recovery-select-btn", "index": 2}, "n_clicks"),
@@ -265,9 +298,10 @@ def register_callbacks(app, G, df):
         State("delay-slider", "value"),
         State("recovery-options-store", "data"),
         State("cascade-result-store", "data"),
+        State("scenario-id-store", "data"),
         prevent_initial_call=True,
     )
-    def apply_recovery(c0, c1, c2, flight_id, delay_min, recovery_store, cascade_store):
+    def apply_recovery(c0, c1, c2, flight_id, delay_min, recovery_store, cascade_store, scenario_id):
         from dash import ctx
 
         if not ctx.triggered_id or not flight_id or not recovery_store:
@@ -280,11 +314,67 @@ def register_callbacks(app, G, df):
         if selection is None:
             raise PreventUpdate
 
+        if platform is not None and scenario_id:
+            platform.record_recovery_selection(
+                scenario_id,
+                selection.option_payload.get("strategy", "UNKNOWN"),
+            )
+
+        state_payload = {
+            "state": "RECOMMENDED",
+            "selected_strategy": selection.option_payload.get("strategy"),
+            "label": selection.option_payload.get("label"),
+        }
+        workflow_note = f"{selection.option_payload.get('label', 'Recovery plan')} selected; awaiting operator review."
+
         return (
             _build_gantt(selection.recovered_df, None, recovery_label=selection.option_payload.get("label")),
             build_cyto_elements(G, selection.recovered_df, flight_id, selection.affected_ids),
             selection.selected_store,
+            _build_comparison_strip(selection.option_payload),
+            state_payload,
+            "RECOMMENDED",
+            workflow_note,
         )
+
+    @app.callback(
+        Output("operator-state-store", "data", allow_duplicate=True),
+        Output("operator-state-badge", "children", allow_duplicate=True),
+        Output("workflow-activity-note", "children", allow_duplicate=True),
+        Input("mark-reviewed-btn", "n_clicks"),
+        Input("accept-plan-btn", "n_clicks"),
+        Input("override-plan-btn", "n_clicks"),
+        State("scenario-id-store", "data"),
+        State("selected-recovery-store", "data"),
+        prevent_initial_call=True,
+    )
+    def update_workflow_state(review_clicks, accept_clicks, override_clicks, scenario_id, selected_recovery_store):
+        from dash import ctx
+
+        if not ctx.triggered_id or not scenario_id:
+            raise PreventUpdate
+
+        selected_payload = {}
+        if selected_recovery_store:
+            try:
+                selected_payload = json.loads(selected_recovery_store)
+            except (TypeError, json.JSONDecodeError):
+                selected_payload = {}
+
+        if ctx.triggered_id == "mark-reviewed-btn":
+            state = "REVIEWED"
+            note = f"Scenario reviewed with plan {selected_payload.get('label', 'baseline')}."
+        elif ctx.triggered_id == "accept-plan-btn":
+            state = "ACCEPTED"
+            note = f"Operator accepted {selected_payload.get('label', 'the no-action baseline')}."
+        else:
+            state = "OVERRIDDEN"
+            note = "Operator override recorded; downstream execution should be confirmed externally."
+
+        if platform is not None:
+            platform.record_workflow_transition(scenario_id, state, note=note)
+
+        return ({"state": state, **selected_payload}, state, note)
 
     @app.callback(
         Output("cyto-node-info", "children"),
@@ -302,13 +392,13 @@ def register_callbacks(app, G, df):
         return f"{fid}  {orig}→{dest}  PAX {pax:,}  slack {slack:.0f}m"
 
 
+
 def _build_cascade_log(result) -> list:
     if not result.events:
         return [html.Div(className="log-empty", children=[
             html.Div("◎", className="icon"),
             html.Div("NO CASCADE"),
-            html.Div("Delay absorbed within existing slack",
-                     style={"opacity": "0.5", "textTransform": "none"}),
+            html.Div("Delay absorbed within existing slack", style={"opacity": "0.5", "textTransform": "none"}),
         ])]
 
     items = []
@@ -330,41 +420,44 @@ def _build_cascade_log(result) -> list:
                 ], className="ci-meta"),
                 html.Div(
                     " → ".join(event.propagation_path),
-                    style={"fontFamily": "JetBrains Mono", "fontSize": "9px",
-                           "color": COLORS["text_3"], "marginTop": "3px",
-                           "whiteSpace": "nowrap", "overflow": "hidden",
-                           "textOverflow": "ellipsis"},
+                    style={"fontFamily": "JetBrains Mono", "fontSize": "9px", "color": COLORS["text_3"], "marginTop": "3px", "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis"},
                 ),
             ],
         ))
     return items
 
 
-def _build_summary_metrics(result) -> html.Div:
+
+def _build_summary_metrics(result, confidence=None, data_quality=None) -> html.Div:
     summary = result.summary()
-    return html.Div([
+    rows = [
         html.Div(className="metrics-row", children=[
-            html.Div(className="metric-box gold", children=[
-                html.Div("FLIGHTS HIT", className="metric-key"),
-                html.Div(summary["flights_affected"], className="metric-val"),
-            ]),
-            html.Div(className="metric-box red", children=[
-                html.Div("TOTAL DELAY", className="metric-key"),
-                html.Div(f"{summary['total_delay_min']:.0f}m", className="metric-val"),
-            ]),
+            html.Div(className="metric-box gold", children=[html.Div("FLIGHTS HIT", className="metric-key"), html.Div(summary["flights_affected"], className="metric-val")]),
+            html.Div(className="metric-box red", children=[html.Div("TOTAL DELAY", className="metric-key"), html.Div(f"{summary['total_delay_min']:.0f}m", className="metric-val")]),
         ]),
         html.Div(className="metrics-row", children=[
-            html.Div(className="metric-box cyan", children=[
-                html.Div("PAX AFFECTED", className="metric-key"),
-                html.Div(f"{summary['total_pax_affected']:,}", className="metric-val"),
-            ]),
-            html.Div(className="metric-box teal", children=[
-                html.Div("EST. COST", className="metric-key"),
-                html.Div(f"${summary['estimated_cost_usd']:,.0f}", className="metric-val",
-                         style={"fontSize": "16px"}),
-            ]),
+            html.Div(className="metric-box cyan", children=[html.Div("PAX AFFECTED", className="metric-key"), html.Div(f"{summary['total_pax_affected']:,}", className="metric-val")]),
+            html.Div(className="metric-box teal", children=[html.Div("EST. COST", className="metric-key"), html.Div(f"${summary['estimated_cost_usd']:,.0f}", className="metric-val", style={"fontSize": "16px"})]),
         ]),
-    ])
+    ]
+    if confidence is not None:
+        rows.append(
+            html.Div(className="metrics-row", children=[
+                html.Div(className="metric-box gold", children=[
+                    html.Div("MODEL CONFIDENCE", className="metric-key"),
+                    html.Div(f"{int(confidence.score * 100)}%", className="metric-val", style={"fontSize": "18px"}),
+                    html.Div(confidence.label, className="rc-metric-sub"),
+                ]),
+                html.Div(className="metric-box cyan", children=[
+                    html.Div("DATA MODE", className="metric-key"),
+                    html.Div(getattr(data_quality, "mode", "LOCAL"), className="metric-val", style={"fontSize": "18px"}),
+                    html.Div(getattr(data_quality, "status", "UNKNOWN"), className="rc-metric-sub"),
+                ]),
+            ])
+        )
+        rows.append(html.Div(" • ".join(confidence.reasons[:2]), className="workflow-note", style={"marginTop": "6px"}))
+    return html.Div(rows)
+
 
 
 def _build_optimizer_summary(optimization) -> html.Div:
@@ -373,37 +466,45 @@ def _build_optimizer_summary(optimization) -> html.Div:
     frontier = ", ".join(optimization.frontier_labels) if optimization.frontier_labels else "—"
     best = optimization.candidates[0]
     return html.Div(className="mc-stats-row", children=[
-        html.Div(className="metric-box teal", children=[
-            html.Div("OPTIMIZER PICK", className="metric-key"),
-            html.Div(optimization.best_label or "—", className="metric-val"),
-        ]),
-        html.Div(className="metric-box cyan", children=[
-            html.Div("OBJECTIVE SCORE", className="metric-key"),
-            html.Div(f"{best.objective_score:.3f}", className="metric-val"),
-        ]),
-        html.Div(className="metric-box gold", children=[
-            html.Div("PARETO FRONT", className="metric-key"),
-            html.Div(frontier, className="metric-val", style={"fontSize": "12px"}),
-        ]),
+        html.Div(className="metric-box teal", children=[html.Div("OPTIMIZER PICK", className="metric-key"), html.Div(optimization.best_label or "—", className="metric-val")]),
+        html.Div(className="metric-box cyan", children=[html.Div("OBJECTIVE SCORE", className="metric-key"), html.Div(f"{best.objective_score:.3f}", className="metric-val")]),
+        html.Div(className="metric-box gold", children=[html.Div("PARETO FRONT", className="metric-key"), html.Div(frontier, className="metric-val", style={"fontSize": "12px"})]),
+        html.Div(className="metric-box red", children=[html.Div("DECISION STATE", className="metric-key"), html.Div("Replayable", className="metric-val", style={"fontSize": "16px"})]),
     ])
+
 
 
 def _empty_log() -> list:
     return [html.Div(className="log-empty", children=[
         html.Div("◌", className="icon"),
         html.Div("AWAITING INPUT"),
-        html.Div("Select a flight and set delay",
-                 style={"opacity": "0.5", "textTransform": "none", "letterSpacing": "0"}),
+        html.Div("Select a flight and set delay", style={"opacity": "0.5", "textTransform": "none", "letterSpacing": "0"}),
     ])]
+
 
 
 def _empty_recovery_cards() -> list:
     return [html.Div(className="log-empty", children=[
         html.Div("◈", className="icon"),
         html.Div("RUN SIMULATION FIRST"),
-        html.Div("Recovery options appear after cascade analysis",
-                 style={"opacity": "0.5", "textTransform": "none", "letterSpacing": "0"}),
+        html.Div("Recovery options appear after cascade analysis", style={"opacity": "0.5", "textTransform": "none", "letterSpacing": "0"}),
     ])]
+
+
+
+def _empty_comparison_strip() -> list:
+    return [html.Div(className="comparison-empty", children="No recovery option selected yet.")]
+
+
+
+def _build_comparison_strip(option_payload: dict) -> list:
+    return [html.Div(className="comparison-strip-grid", children=[
+        html.Div(className="comparison-card", children=[html.Div("PLAN", className="metric-key"), html.Div(option_payload.get("label", "—"), className="metric-val", style={"fontSize": "16px", "color": COLORS["cyan"]})]),
+        html.Div(className="comparison-card", children=[html.Div("DELAY CUT", className="metric-key"), html.Div(f"{option_payload.get('delay_reduction_min', 0):.0f}m", className="metric-val", style={"fontSize": "16px", "color": COLORS["gold"]})]),
+        html.Div(className="comparison-card", children=[html.Div("PAX SAVED", className="metric-key"), html.Div(str(option_payload.get("pax_saved", 0)), className="metric-val", style={"fontSize": "16px", "color": COLORS["teal"]})]),
+        html.Div(className="comparison-card", children=[html.Div("NET COST", className="metric-key"), html.Div(f"${option_payload.get('net_cost_usd', 0):,.0f}", className="metric-val", style={"fontSize": "16px", "color": COLORS["text_1"]})]),
+    ])]
+
 
 
 def _build_recovery_cards(options: list) -> list:
@@ -437,8 +538,7 @@ def _build_recovery_cards(options: list) -> list:
                 html.Div(className="rc-header", children=[
                     html.Span(strategy["icon"], className="rc-icon", style={"color": COLORS["text_3"]}),
                     html.Span(option.label, className="rc-title", style={"color": COLORS["text_3"]}),
-                    html.Span("INFEASIBLE", className="rc-score-badge",
-                              style={"color": COLORS["text_3"], "borderColor": COLORS["border"]}),
+                    html.Span("INFEASIBLE", className="rc-score-badge", style={"color": COLORS["text_3"], "borderColor": COLORS["border"]}),
                 ]),
                 html.Div(option.infeasibility_reason, className="rc-desc", style={"color": COLORS["text_3"]}),
             ])
@@ -447,66 +547,24 @@ def _build_recovery_cards(options: list) -> list:
                 html.Div(className="rc-header", children=[
                     html.Span(strategy["icon"], className="rc-icon", style={"color": strategy["accent"]}),
                     html.Span(option.label, className="rc-title", style={"color": strategy["accent"]}),
-                    html.Span(label, className="rc-score-badge",
-                              style={"color": label_color, "borderColor": label_color}),
+                    html.Span(label, className="rc-score-badge", style={"color": label_color, "borderColor": label_color}),
                 ]),
-                html.Div(
-                    option.recommendation or ("PARETO-EFFICIENT" if option.pareto_efficient else "DOMINATED TRADEOFF"),
-                    className="rc-desc",
-                    style={
-                        "color": COLORS["teal"] if option.pareto_efficient else COLORS["text_3"],
-                        "marginTop": "6px",
-                        "fontSize": "11px",
-                    },
-                ),
-                html.Div(className="rc-score-bar-bg", children=[
-                    html.Div(className="rc-score-bar-fill",
-                             style={"width": f"{max(4, int(option.score))}%", "background": strategy["accent"]}),
-                ]),
+                html.Div(option.recommendation or ("PARETO-EFFICIENT" if option.pareto_efficient else "DOMINATED TRADEOFF"), className="rc-desc", style={"color": COLORS["teal"] if option.pareto_efficient else COLORS["text_3"], "marginTop": "6px", "fontSize": "11px"}),
+                html.Div(className="rc-score-bar-bg", children=[html.Div(className="rc-score-bar-fill", style={"width": f"{max(4, int(option.score))}%", "background": strategy["accent"]})]),
                 html.Div(option.description, className="rc-desc"),
                 html.Div(className="rc-metrics", children=[
-                    html.Div(className="rc-metric", children=[
-                        html.Div("DELAY CUT", className="rc-metric-key"),
-                        html.Div(f"{option.delay_reduction_min:.0f}m", className="rc-metric-val",
-                                 style={"color": strategy["accent"]}),
-                        html.Div(f"({option.delay_reduction_pct:.0f}%)", className="rc-metric-sub"),
-                    ]),
-                    html.Div(className="rc-metric", children=[
-                        html.Div("DIRECT COST", className="rc-metric-key"),
-                        html.Div(f"${option.direct_cost_usd:,.0f}", className="rc-metric-val",
-                                 style={"color": COLORS["text_2"]}),
-                        html.Div("activation", className="rc-metric-sub"),
-                    ]),
-                    html.Div(className="rc-metric", children=[
-                        html.Div("NET COST", className="rc-metric-key"),
-                        html.Div(f"${option.net_cost_usd:,.0f}", className="rc-metric-val",
-                                 style={"color": COLORS["text_1"]}),
-                        html.Div("vs baseline", className="rc-metric-sub"),
-                    ]),
-                    html.Div(className="rc-metric", children=[
-                        html.Div("PAX SAVED", className="rc-metric-key"),
-                        html.Div(str(option.pax_saved), className="rc-metric-val",
-                                 style={"color": COLORS["teal"]}),
-                        html.Div(f"{option.pax_stranded} stranded", className="rc-metric-sub"),
-                    ]),
+                    html.Div(className="rc-metric", children=[html.Div("DELAY CUT", className="rc-metric-key"), html.Div(f"{option.delay_reduction_min:.0f}m", className="rc-metric-val", style={"color": strategy["accent"]}), html.Div(f"({option.delay_reduction_pct:.0f}%)", className="rc-metric-sub")]),
+                    html.Div(className="rc-metric", children=[html.Div("DIRECT COST", className="rc-metric-key"), html.Div(f"${option.direct_cost_usd:,.0f}", className="rc-metric-val", style={"color": COLORS["text_2"]}), html.Div("activation", className="rc-metric-sub")]),
+                    html.Div(className="rc-metric", children=[html.Div("NET COST", className="rc-metric-key"), html.Div(f"${option.net_cost_usd:,.0f}", className="rc-metric-val", style={"color": COLORS["text_1"]}), html.Div("vs baseline", className="rc-metric-sub")]),
+                    html.Div(className="rc-metric", children=[html.Div("PAX SAVED", className="rc-metric-key"), html.Div(str(option.pax_saved), className="rc-metric-val", style={"color": COLORS["teal"]}), html.Div(f"{option.pax_stranded} stranded", className="rc-metric-sub")]),
                 ]),
-                html.Details(className="rc-log-details", children=[
-                    html.Summary("▸ ACTION LOG", className="rc-log-toggle"),
-                    html.Div(className="rc-log-body", children=[
-                        html.Div(line, className="rc-log-line") for line in option.action_log
-                    ]),
-                ]),
-                html.Button(
-                    f"APPLY {option.strategy}",
-                    id={"type": "recovery-select-btn", "index": idx},
-                    className="rc-apply-btn",
-                    style={"borderColor": strategy["accent"], "color": strategy["accent"]},
-                    n_clicks=0,
-                ),
+                html.Details(className="rc-log-details", children=[html.Summary("▸ ACTION LOG", className="rc-log-toggle"), html.Div(className="rc-log-body", children=[html.Div(line, className="rc-log-line") for line in option.action_log])]),
+                html.Button(f"APPLY {option.strategy}", id={"type": "recovery-select-btn", "index": idx}, className="rc-apply-btn", style={"borderColor": strategy["accent"], "color": strategy["accent"]}, n_clicks=0),
             ])
         cards.append(card)
 
     return [html.Div(className="recovery-cards-grid", children=cards)]
+
 
 
 def _build_gantt(df: pd.DataFrame, result, recovery_label: str | None = None) -> go.Figure:
@@ -557,11 +615,7 @@ def _build_gantt(df: pd.DataFrame, result, recovery_label: str | None = None) ->
             y=[row["flight"]],
             base=[row["start"]],
             orientation="h",
-            marker=dict(
-                color=status_colors.get(row["status"], COLORS["normal"]),
-                opacity=0.4 if row["status"] == "cancelled" else 0.85,
-                line=dict(width=0),
-            ),
+            marker=dict(color=status_colors.get(row["status"], COLORS["normal"]), opacity=0.4 if row["status"] == "cancelled" else 0.85, line=dict(width=0)),
             hovertemplate=(
                 f"<b>{row['flight']}</b><br>"
                 f"{row['direction'].upper()} · {row['aircraft']}<br>"
@@ -580,35 +634,11 @@ def _build_gantt(df: pd.DataFrame, result, recovery_label: str | None = None) ->
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=90, r=10, t=4 if not recovery_label else 24, b=30),
         barmode="overlay",
-        title=dict(text=title_text, font=dict(
-            family="Barlow Condensed", size=12, color="#00D4A0"), x=0.01) if recovery_label else {},
+        title=dict(text=title_text, font=dict(family="Barlow Condensed", size=12, color="#00D4A0"), x=0.01) if recovery_label else {},
         font=dict(family="JetBrains Mono", color=COLORS["text_2"], size=10),
-        xaxis=dict(
-            type="date",
-            showgrid=True,
-            gridcolor="rgba(28,45,72,0.6)",
-            zeroline=False,
-            tickfont=dict(size=9, color=COLORS["text_3"]),
-            tickformat="%H:%M",
-        ),
-        yaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(size=9, color=COLORS["text_3"]),
-            autorange="reversed",
-        ),
-        hoverlabel=dict(
-            bgcolor=COLORS["bg_2"],
-            bordercolor=COLORS["border"],
-            font=dict(family="JetBrains Mono", size=11, color=COLORS["text_1"]),
-        ),
+        xaxis=dict(type="date", showgrid=True, gridcolor="rgba(28,45,72,0.6)", zeroline=False, tickfont=dict(size=9, color=COLORS["text_3"]), tickformat="%H:%M"),
+        yaxis=dict(showgrid=False, zeroline=False, tickfont=dict(size=9, color=COLORS["text_3"]), autorange="reversed"),
+        hoverlabel=dict(bgcolor=COLORS["bg_2"], bordercolor=COLORS["border"], font=dict(family="JetBrains Mono", size=11, color=COLORS["text_1"])),
     )
     return fig
-
-
-
-
-
-
-
 

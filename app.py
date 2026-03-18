@@ -18,6 +18,8 @@ from engine.config import USE_OPENSKY_BY_DEFAULT
 from engine.data_loader import load_schedule
 from engine.cyto_graph import build_cyto_stylesheet
 from engine.graph_builder import build_graph, graph_summary
+from ops.api import register_api
+from ops.services import build_ops_platform
 from ui.callbacks import register_callbacks, register_phase3_callbacks
 from ui.layout import build_layout
 
@@ -31,6 +33,7 @@ logger = logging.getLogger("app")
 
 # Load Cytoscape extra layouts (cola, dagre, etc.) — optional but nice
 cyto.load_extra_layouts()
+
 
 
 def build_flight_options(df: pd.DataFrame, inbound_only: bool = True) -> list[dict]:
@@ -48,10 +51,11 @@ def build_flight_options(df: pd.DataFrame, inbound_only: bool = True) -> list[di
     return flight_options
 
 
-def create_app(df: pd.DataFrame, graph):
+
+def create_app(df: pd.DataFrame, graph, platform=None):
     """Initialise and wire the Dash application."""
+    platform = platform or build_ops_platform(df, graph)
     flight_options = build_flight_options(df, inbound_only=True)
-    source_label = str(df.attrs.get("data_source", "synthetic-hub-schedule")).replace("-", " ").upper()
 
     app = dash.Dash(
         __name__,
@@ -66,15 +70,21 @@ def create_app(df: pd.DataFrame, graph):
     initial_graph_stylesheet = build_cyto_stylesheet()
     app.layout = build_layout(
         flight_options,
-        source_label,
+        platform.data_quality.source_label,
+        data_health_label=platform.data_quality.status,
+        ops_mode_label=f"{platform.data_quality.mode} · {platform.settings.model_version}",
         initial_graph_elements=initial_graph_elements,
         initial_graph_stylesheet=initial_graph_stylesheet,
     )
 
-    # Register callbacks — no positions arg needed now (Cytoscape handles layout)
-    register_callbacks(app, graph, df)
-    register_phase3_callbacks(app, graph, df)
+    app.silsila_platform = platform
+    app.server.config["silsila_platform"] = platform
+    register_api(app.server, platform)
+
+    register_callbacks(app, graph, df, platform=platform)
+    register_phase3_callbacks(app, graph, df, platform=platform)
     return app
+
 
 
 def load_runtime_context():
@@ -95,10 +105,19 @@ def load_runtime_context():
     return df, graph
 
 
+
 def build_runtime_app():
     """Create a fully-wired app using the current runtime schedule and graph."""
     df, graph = load_runtime_context()
-    return create_app(df, graph)
+    platform = build_ops_platform(df, graph)
+    logger.info(
+        "Data quality: %s / %s  ·  model %s",
+        platform.data_quality.status,
+        platform.data_quality.mode,
+        platform.settings.model_version,
+    )
+    return create_app(df, graph, platform=platform)
+
 
 
 def main():

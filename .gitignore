@@ -25,3 +25,15 @@ Thumbs.db
 data/processed/
 logs/
 *.log
+
+# Runtime persistence
+*.db
+*.sqlite
+*.sqlite3
+data/runtime/
+.selenium-cache/
+.selenium-profile/
+.selenium-profile-debug/
+.tmp-selenium/
+.tmp-selenium-diagnostic/
+chromedriver/

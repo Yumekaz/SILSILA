@@ -1,6 +1,42 @@
 services:
   - type: web
     name: silsila-doha-cascade
-    env: python
+    runtime: python
+    plan: starter
+    numInstances: 1
+    autoDeployTrigger: checksPass
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn server:server
+    startCommand: gunicorn server:server --config gunicorn.conf.py
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 60
+    disk:
+      name: silsila-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: SILSILA_DB_PATH
+        value: /var/data/silsila_ops.db
+      - key: SILSILA_ENVIRONMENT
+        value: production
+      - key: SILSILA_MODEL_VERSION
+        value: cascade-v2.0-render
+      - key: SILSILA_RESPONSE_SLO_MS
+        value: 2500
+      - key: SILSILA_MAX_WORKERS
+        value: 2
+      - key: SILSILA_FEATURE_API
+        value: "true"
+      - key: SILSILA_FEATURE_JOBS
+        value: "true"
+      - key: SILSILA_FEATURE_WORKFLOW
+        value: "true"
+      - key: SILSILA_FEATURE_METRICS
+        value: "true"
+      - key: SILSILA_USE_OPENSKY_BY_DEFAULT
+        value: "false"
+      - key: WEB_CONCURRENCY
+        value: 1
+      - key: GUNICORN_THREADS
+        value: 4
+      - key: GUNICORN_TIMEOUT
+        value: 120
