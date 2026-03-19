@@ -11,6 +11,8 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
       - name: Resolve Python version
@@ -59,4 +61,4 @@ jobs:
           PY
       - name: Test
         run: |
-          pytest -q
+          python -m pytest -q

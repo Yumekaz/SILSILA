@@ -37,7 +37,9 @@ def test_ci_workflow_tracks_runtime_pin_and_smokes_entrypoint():
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
+    assert "PYTHONPATH: ${{ github.workspace }}" in workflow
     assert "sed 's/^python-//' runtime.txt" in workflow
     assert "cache: pip" in workflow
     assert "import server" in workflow
     assert 'client.get("/healthz")' in workflow
+    assert "python -m pytest -q" in workflow
