@@ -5,13 +5,16 @@ from pathlib import Path
 
 def test_render_blueprint_includes_port_binding_and_persistent_disk():
     render_yaml = Path("render.yaml").read_text(encoding="utf-8")
+    procfile = Path("Procfile").read_text(encoding="utf-8").strip()
+    start_command = "gunicorn server:server --config gunicorn.conf.py"
 
     assert "runtime: python" in render_yaml
-    assert "gunicorn server:server --config gunicorn.conf.py" in render_yaml
+    assert start_command in render_yaml
     assert "healthCheckPath: /healthz" in render_yaml
     assert "mountPath: /var/data" in render_yaml
     assert "SILSILA_DB_PATH" in render_yaml
     assert "WEB_CONCURRENCY" in render_yaml
+    assert procfile == f"web: {start_command}"
 
 
 def test_gunicorn_config_reads_port_from_environment():
@@ -21,3 +24,10 @@ def test_gunicorn_config_reads_port_from_environment():
     assert "bind =" in gunicorn_conf
     assert "WEB_CONCURRENCY" in gunicorn_conf
     assert "GUNICORN_THREADS" in gunicorn_conf
+
+
+def test_runtime_version_pin_exists_for_render_builds():
+    runtime_txt = Path("runtime.txt")
+
+    assert runtime_txt.exists()
+    assert runtime_txt.read_text(encoding="utf-8").strip() == "python-3.12.8"

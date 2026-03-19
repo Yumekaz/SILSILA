@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import json
@@ -18,12 +19,25 @@ class OpsRepository:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn = sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000")
         return conn
 
+    @contextmanager
+    def _connection(self):
+        conn = self._connect()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def _initialize(self) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS scenario_runs (
@@ -87,7 +101,7 @@ class OpsRepository:
             )
 
     def save_scenario_run(self, payload: dict[str, Any]) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO scenario_runs (
@@ -114,10 +128,10 @@ class OpsRepository:
         state: str,
         selected_strategy: str | None = None,
         note: str | None = None,
-    ) -> None:
+    ) -> bool:
         now = datetime.now(tz=timezone.utc).isoformat()
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock, self._connection() as conn:
+            cursor = conn.execute(
                 """
                 UPDATE scenario_runs
                 SET updated_at = ?, state = ?, selected_strategy = COALESCE(?, selected_strategy), decision_note = COALESCE(?, decision_note)
@@ -125,14 +139,15 @@ class OpsRepository:
                 """,
                 (now, state, selected_strategy, note, scenario_id),
             )
+        return cursor.rowcount > 0
 
     def get_scenario(self, scenario_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute("SELECT * FROM scenario_runs WHERE id = ?", (scenario_id,)).fetchone()
         return self._decode_scenario_row(row) if row else None
 
     def list_recent_scenarios(self, limit: int = 10) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM scenario_runs ORDER BY created_at DESC LIMIT ?",
                 (int(limit),),
@@ -150,7 +165,7 @@ class OpsRepository:
         actor_role: str,
         details: dict[str, Any],
     ) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO audit_events (id, created_at, scenario_id, event_type, actor, actor_role, details)
@@ -166,7 +181,7 @@ class OpsRepository:
         else:
             query = "SELECT * FROM audit_events ORDER BY created_at DESC LIMIT ?"
             params = (int(limit),)
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
         results = []
         for row in rows:
@@ -176,7 +191,7 @@ class OpsRepository:
         return results
 
     def create_job(self, payload: dict[str, Any]) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO jobs (id, created_at, started_at, finished_at, job_type, state, actor, actor_role, metadata, result_payload, error_message)
@@ -189,20 +204,21 @@ class OpsRepository:
                 ),
             )
 
-    def update_job(self, job_id: str, **updates: Any) -> None:
+    def update_job(self, job_id: str, **updates: Any) -> bool:
         if not updates:
-            return
+            return False
         fields = []
         values = []
         for key, value in updates.items():
             fields.append(f"{key} = ?")
             values.append(value)
         values.append(job_id)
-        with self._lock, self._connect() as conn:
-            conn.execute(f"UPDATE jobs SET {', '.join(fields)} WHERE id = ?", values)
+        with self._lock, self._connection() as conn:
+            cursor = conn.execute(f"UPDATE jobs SET {', '.join(fields)} WHERE id = ?", values)
+        return cursor.rowcount > 0
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if not row:
             return None
@@ -212,7 +228,7 @@ class OpsRepository:
         return item
 
     def job_counts(self) -> dict[str, int]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute("SELECT state, COUNT(*) AS count FROM jobs GROUP BY state").fetchall()
         return {row["state"]: int(row["count"]) for row in rows}
 

@@ -176,7 +176,13 @@ def build_control_panel(flight_options: list) -> html.Div:
             ),
 
             html.Div(className="divider"),
-            html.Div(id="summary-metrics"),
+            html.Div(className="control-helper-card", children=[
+                html.Div("RUNBOOK", className="control-label"),
+                html.Div("1. Select inbound trigger", className="control-helper-line"),
+                html.Div("2. Simulate cascade impact", className="control-helper-line"),
+                html.Div("3. Review ranked recovery options", className="control-helper-line"),
+                html.Div("4. Record operator decision", className="control-helper-line"),
+            ]),
         ]),
     ])
 
@@ -247,14 +253,21 @@ def build_cascade_log_panel() -> html.Div:
             html.Span("CASCADE LOG", className="panel-title"),
             html.Span("0 AFFECTED", id="affected-count", className="panel-badge"),
         ]),
-        html.Div(className="panel-body", id="cascade-log", children=[
-            html.Div(className="log-empty", children=[
-                html.Div("◌", className="icon"),
-                html.Div("AWAITING INPUT"),
-                html.Div("Select a flight and set delay",
-                         style={"opacity": "0.5", "textTransform": "none",
-                                "letterSpacing": "0"}),
-            ])
+        html.Div(className="panel-body cascade-panel-body", children=[
+            html.Div(id="summary-metrics"),
+            html.Div(className="cascade-feed-head", children=[
+                html.Div("EVENT FEED", className="control-label"),
+                html.Div("Ordered by highest propagated delay and severity.", className="cascade-feed-copy"),
+            ]),
+            html.Div(className="cascade-log-scroll", id="cascade-log", children=[
+                html.Div(className="log-empty", children=[
+                    html.Div("◌", className="icon"),
+                    html.Div("AWAITING INPUT"),
+                    html.Div("Trigger and delay are loaded. Run SIMULATE CASCADE to create a scenario.",
+                             style={"opacity": "0.5", "textTransform": "none",
+                                     "letterSpacing": "0"}),
+                ])
+            ]),
         ]),
     ])
 
@@ -285,7 +298,7 @@ def build_recovery_panel() -> html.Div:
             html.Span("RECOVERY OPTIONS", className="panel-title"),
             html.Div(className="panel-header-actions", children=[
                 html.Span("RECOVERY", className="panel-badge", style={"marginRight": "6px"}),
-                html.Span("AWAITING CASCADE", className="panel-badge", id="recovery-status-badge"),
+                html.Span("AWAITING CASCADE", className="panel-badge status-pill status-awaiting", id="recovery-status-badge"),
             ]),
         ]),
         html.Div(
@@ -307,12 +320,12 @@ def build_recovery_panel() -> html.Div:
         html.Div(className="workflow-toolbar", children=[
             html.Div(className="workflow-status-block", children=[
                 html.Div("SCENARIO STATE", className="control-label"),
-                html.Div("AWAITING CASCADE", id="operator-state-badge", className="workflow-state-badge"),
+                html.Div("AWAITING CASCADE", id="operator-state-badge", className="workflow-state-badge status-pill status-awaiting"),
             ]),
             html.Div(className="workflow-actions", children=[
-                html.Button("MARK REVIEWED", id="mark-reviewed-btn", className="workflow-btn", n_clicks=0),
-                html.Button("ACCEPT PLAN", id="accept-plan-btn", className="workflow-btn workflow-btn-accept", n_clicks=0),
-                html.Button("OVERRIDE", id="override-plan-btn", className="workflow-btn workflow-btn-override", n_clicks=0),
+                html.Button("MARK REVIEWED", id="mark-reviewed-btn", className="workflow-btn", n_clicks=0, disabled=True),
+                html.Button("ACCEPT PLAN", id="accept-plan-btn", className="workflow-btn workflow-btn-accept", n_clicks=0, disabled=True),
+                html.Button("OVERRIDE", id="override-plan-btn", className="workflow-btn workflow-btn-override", n_clicks=0, disabled=True),
             ]),
             html.Div(
                 "Run a simulation to create an auditable scenario.",
@@ -332,7 +345,7 @@ def build_monte_carlo_panel() -> html.Div:
                 html.Span("RISK LAB", className="panel-badge", style={"marginRight": "6px"}),
                 html.Span(f"{MC_SCENARIOS} SCENARIOS", className="panel-badge", style={"marginRight": "6px"}),
                 html.Button("▶  RUN MONTE CARLO", id="mc-run-btn", className="mc-run-btn", n_clicks=0),
-                html.Button("⬇  EXPORT PDF", id="pdf-export-btn", className="mc-export-btn", n_clicks=0),
+                html.Button("⬇  EXPORT PDF", id="pdf-export-btn", className="mc-export-btn", n_clicks=0, disabled=True),
                 dcc.Download(id="pdf-download"),
             ]),
         ]),

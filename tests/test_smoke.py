@@ -30,6 +30,25 @@ from ui.session_state import (
     serialize_recovery_options,
 )
 from ui.workflows import run_simulation_bundle
+
+
+def _find_component(root, *, component_id=None, class_name=None):
+    if root is None:
+        return None
+    if component_id is not None and getattr(root, "id", None) == component_id:
+        return root
+    if class_name is not None and getattr(root, "className", None) == class_name:
+        return root
+    children = getattr(root, "children", None)
+    if children is None:
+        return None
+    if not isinstance(children, (list, tuple)):
+        children = [children]
+    for child in children:
+        match = _find_component(child, component_id=component_id, class_name=class_name)
+        if match is not None:
+            return match
+    return None
 @pytest.fixture(scope="module")
 def schedule_df():
     return load_schedule(datetime.now(timezone.utc), use_opensky=False)
@@ -59,25 +78,42 @@ def test_flight_options_are_inbound_only(schedule_df):
 
 def test_app_starts_with_graph_in_standby_mode(schedule_df, dependency_graph):
     app = create_app(schedule_df, dependency_graph)
-    graph = app.layout.children[1].children[1].children[1].children[1]
-    empty_state = app.layout.children[1].children[1].children[1].children[0]
+    graph = _find_component(app.layout, component_id="network-graph")
+    empty_state = _find_component(app.layout, component_id="graph-empty-state")
 
+    assert graph is not None
+    assert empty_state is not None
     assert graph.elements == []
     assert empty_state.style == {"display": "flex"}
 
 
 def test_panel_headers_wrap_actions_in_flex_containers(schedule_df, dependency_graph):
     app = create_app(schedule_df, dependency_graph)
+    panel_headers = []
 
-    headers = [
-        app.layout.children[1].children[1].children[0],
-        app.layout.children[2].children[0],
-        app.layout.children[4].children[0],
-        app.layout.children[5].children[0],
+    def _collect_headers(node):
+        if node is None:
+            return
+        if getattr(node, "className", None) == "panel-header":
+            panel_headers.append(node)
+        children = getattr(node, "children", None)
+        if children is None:
+            return
+        if not isinstance(children, (list, tuple)):
+            children = [children]
+        for child in children:
+            _collect_headers(child)
+
+    _collect_headers(app.layout)
+
+    assert panel_headers
+    action_headers = [
+        header
+        for header in panel_headers
+        if len(header.children) > 1 and getattr(header.children[1], "className", "") == "panel-header-actions"
     ]
 
-    for header in headers:
-        assert header.children[1].className == "panel-header-actions"
+    assert len(action_headers) >= 4
 
 
 def test_graph_builds_and_has_core_edge_types(dependency_graph):

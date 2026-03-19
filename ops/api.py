@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from flask import jsonify, request
+import math
 
 from ops.auth import require_role, resolve_request_user
+from ops.services import FeatureDisabledError, ScenarioNotFoundError, WorkflowTransitionError
 
 
 
@@ -20,9 +22,41 @@ def register_api(server, platform) -> None:
         status = 401 if "authentication" in str(exc).lower() else 403
         return jsonify({"error": str(exc)}), status
 
+    def _json_error(message: str, status: int):
+        return jsonify({"error": message}), status
+
+    def _parse_bool(value):
+        if value is None or isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        raise ValueError("use_opensky must be a boolean.")
+
+    def _parse_delay_min(value):
+        try:
+            delay_min = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("delay_min must be a numeric value.") from exc
+        if not math.isfinite(delay_min) or delay_min <= 0:
+            raise ValueError("delay_min must be greater than 0.")
+        return delay_min
+
+    def _parse_positive_int(value, field_name: str):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be an integer.") from exc
+        if parsed <= 0:
+            raise ValueError(f"{field_name} must be greater than 0.")
+        return parsed
+
     @server.get("/healthz")
     def silsila_healthz():
-        return jsonify(platform.health_snapshot())
+        return jsonify(platform.public_health_snapshot())
 
     @server.get("/api/health")
     def silsila_api_health():
@@ -39,19 +73,21 @@ def register_api(server, platform) -> None:
         except PermissionError as exc:
             return _error_response(exc)
         payload = request.get_json(silent=True) or {}
-        use_opensky = payload.get("use_opensky")
-        if use_opensky is not None:
-            use_opensky = bool(use_opensky)
+        try:
+            use_opensky = _parse_bool(payload.get("use_opensky"))
+        except ValueError as exc:
+            return _json_error(str(exc), 400)
         result = platform.refresh_runtime_from_source(use_opensky=use_opensky, actor=user.username, actor_role=user.role)
         return jsonify(result)
 
-    @server.get("/api/metrics")
-    def silsila_api_metrics():
-        try:
-            _authorize({"operator", "admin"})
-        except PermissionError as exc:
-            return _error_response(exc)
-        return jsonify(platform.metrics_snapshot())
+    if platform.settings.feature_metrics:
+        @server.get("/api/metrics")
+        def silsila_api_metrics():
+            try:
+                _authorize({"operator", "admin"})
+            except PermissionError as exc:
+                return _error_response(exc)
+            return jsonify(platform.metrics_snapshot())
 
     @server.get("/api/scenarios")
     def silsila_api_list_scenarios():
@@ -69,11 +105,19 @@ def register_api(server, platform) -> None:
         except PermissionError as exc:
             return _error_response(exc)
         payload = request.get_json(silent=True) or {}
-        flight_id = payload.get("flight_id")
-        delay_min = payload.get("delay_min")
-        if not flight_id or delay_min is None:
-            return jsonify({"error": "flight_id and delay_min are required."}), 400
-        execution = platform.run_simulation(flight_id, float(delay_min), actor=user.username, actor_role=user.role)
+        flight_id = str(payload.get("flight_id") or "").strip().upper()
+        if not flight_id:
+            return _json_error("flight_id and delay_min are required.", 400)
+        try:
+            delay_min = _parse_delay_min(payload.get("delay_min"))
+        except ValueError as exc:
+            return _json_error(str(exc), 400)
+        if flight_id not in platform.graph:
+            return _json_error("flight_id was not found in the current dependency graph.", 404)
+        try:
+            execution = platform.run_simulation(flight_id, delay_min, actor=user.username, actor_role=user.role)
+        except ValueError as exc:
+            return _json_error(str(exc), 400)
         return jsonify(
             {
                 "scenario_id": execution.scenario_id,
@@ -98,45 +142,69 @@ def register_api(server, platform) -> None:
             return jsonify({"error": "Scenario not found."}), 404
         return jsonify(scenario)
 
-    @server.post("/api/scenarios/<scenario_id>/workflow")
-    def silsila_api_update_workflow(scenario_id: str):
-        try:
-            user = _authorize({"operator", "admin"})
-        except PermissionError as exc:
-            return _error_response(exc)
-        payload = request.get_json(silent=True) or {}
-        state = str(payload.get("state") or "").upper()
-        note = payload.get("note")
-        if state not in {"REVIEWED", "ACCEPTED", "OVERRIDDEN", "RECOMMENDED"}:
-            return jsonify({"error": "state must be REVIEWED, RECOMMENDED, ACCEPTED, or OVERRIDDEN."}), 400
-        if state == "RECOMMENDED":
-            strategy = payload.get("selected_strategy")
-            if not strategy:
-                return jsonify({"error": "selected_strategy is required for RECOMMENDED state."}), 400
-            platform.record_recovery_selection(scenario_id, str(strategy), actor=user.username, actor_role=user.role)
-        else:
-            platform.record_workflow_transition(scenario_id, state, actor=user.username, actor_role=user.role, note=note)
-        scenario = platform.get_scenario(scenario_id)
-        return jsonify({"scenario_id": scenario_id, "state": state, "scenario": scenario})
+    if platform.settings.feature_workflow:
+        @server.post("/api/scenarios/<scenario_id>/workflow")
+        def silsila_api_update_workflow(scenario_id: str):
+            try:
+                user = _authorize({"operator", "admin"})
+            except PermissionError as exc:
+                return _error_response(exc)
+            payload = request.get_json(silent=True) or {}
+            state = str(payload.get("state") or "").upper()
+            note = payload.get("note")
+            if state not in {"REVIEWED", "ACCEPTED", "OVERRIDDEN", "RECOMMENDED"}:
+                return _json_error("state must be REVIEWED, RECOMMENDED, ACCEPTED, or OVERRIDDEN.", 400)
+            try:
+                if state == "RECOMMENDED":
+                    strategy = str(payload.get("selected_strategy") or "").strip().upper()
+                    if not strategy:
+                        return _json_error("selected_strategy is required for RECOMMENDED state.", 400)
+                    platform.record_recovery_selection(scenario_id, strategy, actor=user.username, actor_role=user.role)
+                else:
+                    platform.record_workflow_transition(
+                        scenario_id,
+                        state,
+                        actor=user.username,
+                        actor_role=user.role,
+                        note=note,
+                    )
+            except ScenarioNotFoundError as exc:
+                return _json_error(str(exc), 404)
+            except WorkflowTransitionError as exc:
+                return _json_error(str(exc), 409)
+            scenario = platform.get_scenario(scenario_id)
+            if scenario is None:
+                return _json_error("Scenario not found.", 404)
+            return jsonify({"scenario_id": scenario_id, "state": state, "scenario": scenario})
 
-    @server.post("/api/jobs/monte-carlo")
-    def silsila_api_queue_monte_carlo():
-        try:
-            user = _authorize({"operator", "admin"})
-        except PermissionError as exc:
-            return _error_response(exc)
-        payload = request.get_json(silent=True) or {}
-        n_scenarios = max(1, int(payload.get("n_scenarios", 100)))
-        job_id = platform.submit_monte_carlo_job(n_scenarios=n_scenarios, actor=user.username, actor_role=user.role)
-        return jsonify({"job_id": job_id, "state": "QUEUED"}), 202
+    if platform.settings.feature_jobs:
+        @server.post("/api/jobs/monte-carlo")
+        def silsila_api_queue_monte_carlo():
+            try:
+                user = _authorize({"operator", "admin"})
+            except PermissionError as exc:
+                return _error_response(exc)
+            payload = request.get_json(silent=True) or {}
+            try:
+                n_scenarios = _parse_positive_int(payload.get("n_scenarios", 100), "n_scenarios")
+                job_id = platform.submit_monte_carlo_job(
+                    n_scenarios=n_scenarios,
+                    actor=user.username,
+                    actor_role=user.role,
+                )
+            except ValueError as exc:
+                return _json_error(str(exc), 400)
+            except FeatureDisabledError as exc:
+                return _json_error(str(exc), 404)
+            return jsonify({"job_id": job_id, "state": "QUEUED"}), 202
 
-    @server.get("/api/jobs/<job_id>")
-    def silsila_api_get_job(job_id: str):
-        try:
-            _authorize({"viewer", "operator", "admin"})
-        except PermissionError as exc:
-            return _error_response(exc)
-        job = platform.repository.get_job(job_id)
-        if job is None:
-            return jsonify({"error": "Job not found."}), 404
-        return jsonify(job)
+        @server.get("/api/jobs/<job_id>")
+        def silsila_api_get_job(job_id: str):
+            try:
+                _authorize({"viewer", "operator", "admin"})
+            except PermissionError as exc:
+                return _error_response(exc)
+            job = platform.repository.get_job(job_id)
+            if job is None:
+                return _json_error("Job not found.", 404)
+            return jsonify(job)

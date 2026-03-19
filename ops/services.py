@@ -32,6 +32,18 @@ from ui.session_state import (
 from ui.workflows import prepare_pdf_export_bundle, run_simulation_bundle
 
 
+class FeatureDisabledError(RuntimeError):
+    """Raised when a disabled operational feature is called."""
+
+
+class ScenarioNotFoundError(LookupError):
+    """Raised when a requested scenario does not exist."""
+
+
+class WorkflowTransitionError(ValueError):
+    """Raised when a workflow transition breaks the scenario state model."""
+
+
 @dataclass(frozen=True)
 class DataQualityStatus:
     status: str
@@ -66,7 +78,11 @@ class OpsPlatform:
         self.settings = settings or load_ops_settings()
         self.metrics = MetricsRegistry()
         self.repository = OpsRepository(self.settings.db_path)
-        self.jobs = BackgroundJobManager(self.repository, self.metrics, max_workers=self.settings.max_workers)
+        self.jobs = (
+            BackgroundJobManager(self.repository, self.metrics, max_workers=self.settings.max_workers)
+            if self.settings.feature_jobs
+            else None
+        )
         self.refresh_runtime(df, graph)
 
     def refresh_runtime(self, df, graph) -> None:
@@ -167,7 +183,18 @@ class OpsPlatform:
         return SimulationExecution(scenario_id=scenario_id, bundle=bundle, confidence=confidence)
 
     def record_recovery_selection(self, scenario_id: str, strategy: str, actor: str = "dashboard", actor_role: str = "operator") -> None:
-        self.repository.update_scenario_state(scenario_id, "RECOMMENDED", selected_strategy=strategy)
+        self._ensure_feature_enabled(self.settings.feature_workflow, "workflow")
+        scenario = self.repository.get_scenario(scenario_id)
+        if scenario is None:
+            raise ScenarioNotFoundError(f"Scenario '{scenario_id}' was not found.")
+        current_state = str(scenario.get("state", "SIMULATED")).upper()
+        if current_state not in {"SIMULATED", "RECOMMENDED"}:
+            raise WorkflowTransitionError(
+                f"Cannot record recovery selection for a scenario in state '{current_state}'."
+            )
+        updated = self.repository.update_scenario_state(scenario_id, "RECOMMENDED", selected_strategy=strategy)
+        if not updated:
+            raise ScenarioNotFoundError(f"Scenario '{scenario_id}' was not found.")
         self._append_audit(
             scenario_id=scenario_id,
             event_type="recovery.selected",
@@ -185,7 +212,22 @@ class OpsPlatform:
         actor_role: str = "operator",
         note: str | None = None,
     ) -> None:
-        self.repository.update_scenario_state(scenario_id, state, note=note)
+        self._ensure_feature_enabled(self.settings.feature_workflow, "workflow")
+        scenario = self.repository.get_scenario(scenario_id)
+        if scenario is None:
+            raise ScenarioNotFoundError(f"Scenario '{scenario_id}' was not found.")
+        current_state = str(scenario.get("state", "SIMULATED")).upper()
+        allowed = {
+            "RECOMMENDED": {"REVIEWED", "OVERRIDDEN"},
+            "REVIEWED": {"ACCEPTED", "OVERRIDDEN"},
+        }
+        if state not in allowed.get(current_state, set()):
+            raise WorkflowTransitionError(
+                f"Invalid workflow transition from '{current_state}' to '{state}'."
+            )
+        updated = self.repository.update_scenario_state(scenario_id, state, note=note)
+        if not updated:
+            raise ScenarioNotFoundError(f"Scenario '{scenario_id}' was not found.")
         self._append_audit(
             scenario_id=scenario_id,
             event_type="workflow.transition",
@@ -210,6 +252,9 @@ class OpsPlatform:
         return mc
 
     def submit_monte_carlo_job(self, n_scenarios: int, actor: str = "api", actor_role: str = "operator") -> str:
+        self._ensure_feature_enabled(self.settings.feature_jobs, "jobs")
+        if self.jobs is None:
+            raise FeatureDisabledError("Background jobs are disabled.")
         return self.jobs.submit(
             job_type="monte_carlo",
             actor=actor,
@@ -331,11 +376,30 @@ class OpsPlatform:
             "graph_validation": asdict(self.graph_report),
             "graph_summary": self.graph_snapshot,
             "job_counts": job_counts,
-            "metrics": self.metrics.snapshot(),
+            "metrics": self.metrics.snapshot() if self.settings.feature_metrics else {},
             "recent_scenarios": self.recent_scenarios(limit=5),
         }
 
+    def public_health_snapshot(self) -> dict[str, Any]:
+        detailed = self.health_snapshot()
+        data_quality = detailed["data_quality"]
+        return {
+            "status": detailed["status"],
+            "environment": detailed["environment"],
+            "model_version": detailed["model_version"],
+            "data_quality": {
+                "status": data_quality["status"],
+                "mode": data_quality["mode"],
+                "source_label": data_quality["source_label"],
+                "loaded_at": data_quality["loaded_at"],
+                "freshness_seconds": data_quality["freshness_seconds"],
+                "fallback_active": data_quality["fallback_active"],
+            },
+            "alerts": detailed["alerts"],
+        }
+
     def metrics_snapshot(self) -> dict[str, Any]:
+        self._ensure_feature_enabled(self.settings.feature_metrics, "metrics")
         snapshot = self.metrics.snapshot()
         snapshot["response_slo_ms"] = self.settings.response_slo_ms
         snapshot["job_counts"] = self.repository.job_counts()
@@ -370,6 +434,10 @@ class OpsPlatform:
             actor_role=actor_role,
             details=details,
         )
+
+    def _ensure_feature_enabled(self, enabled: bool, feature_name: str) -> None:
+        if not enabled:
+            raise FeatureDisabledError(f"{feature_name.capitalize()} feature is disabled.")
 
 
 

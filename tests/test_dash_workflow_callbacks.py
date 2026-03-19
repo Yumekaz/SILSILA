@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 
 from app import create_app
@@ -85,13 +86,19 @@ def test_dash_callback_workflow_round_trip(tmp_path):
     scenario_id = simulate_payload["scenario-id-store"]["data"]
     cascade_store = simulate_payload["cascade-result-store"]["data"]
     recovery_store = simulate_payload["recovery-options-store"]["data"]
+    recovery_options = json.loads(recovery_store)
+    feasible_indices = [idx for idx, option in enumerate(recovery_options) if option.get("feasible")]
+    assert feasible_indices
 
     scenario = platform.get_scenario(scenario_id)
     assert scenario is not None
     assert scenario["state"] == "SIMULATED"
     assert scenario["trigger_flight"] == "QR021"
 
-    apply_key = _callback_key(app, '{"index":0,"type":"recovery-select-btn"}')
+    selected_index = feasible_indices[0]
+    click_values = [0] * len(feasible_indices)
+    click_values[0] = 1
+    apply_key = _callback_key(app, '{"index":["ALL"],"type":"recovery-select-btn"}')
     apply_response = client.post(
         "/_dash-update-component",
         json={
@@ -103,13 +110,12 @@ def test_dash_callback_workflow_round_trip(tmp_path):
                 {"id": "recovery-comparison-strip", "property": "children"},
                 {"id": "operator-state-store", "property": "data"},
                 {"id": "operator-state-badge", "property": "children"},
+                {"id": "recovery-status-badge", "property": "children"},
                 {"id": "workflow-activity-note", "property": "children"},
             ],
-            "changedPropIds": ['{"index":0,"type":"recovery-select-btn"}.n_clicks'],
+            "changedPropIds": [f'{{"index":{selected_index},"type":"recovery-select-btn"}}.n_clicks'],
             "inputs": [
-                {"id": '{"index":0,"type":"recovery-select-btn"}', "property": "n_clicks", "value": 1},
-                {"id": '{"index":1,"type":"recovery-select-btn"}', "property": "n_clicks", "value": 0},
-                {"id": '{"index":2,"type":"recovery-select-btn"}', "property": "n_clicks", "value": 0},
+                {"id": '{"index":["ALL"],"type":"recovery-select-btn"}', "property": "n_clicks", "value": click_values},
             ],
             "state": [
                 {"id": "flight-select", "property": "value", "value": "QR021"},
@@ -128,6 +134,7 @@ def test_dash_callback_workflow_round_trip(tmp_path):
     assert scenario is not None
     assert scenario["state"] == "RECOMMENDED"
     assert scenario["selected_strategy"]
+    assert apply_payload["recovery-status-badge"]["children"] == "PLAN SELECTED"
 
     review_key = _callback_key(app, "mark-reviewed-btn")
     review_response = client.post(
@@ -137,6 +144,7 @@ def test_dash_callback_workflow_round_trip(tmp_path):
             "outputs": [
                 {"id": "operator-state-store", "property": "data"},
                 {"id": "operator-state-badge", "property": "children"},
+                {"id": "recovery-status-badge", "property": "children"},
                 {"id": "workflow-activity-note", "property": "children"},
             ],
             "changedPropIds": ["mark-reviewed-btn.n_clicks"],
@@ -152,8 +160,40 @@ def test_dash_callback_workflow_round_trip(tmp_path):
         },
     )
     assert review_response.status_code == 200
+    review_payload = review_response.get_json()["response"]
+    assert review_payload["recovery-status-badge"]["children"] == "UNDER REVIEW"
 
     scenario = platform.get_scenario(scenario_id)
     assert scenario is not None
     assert scenario["state"] == "REVIEWED"
     assert any(event["event_type"] == "workflow.transition" for event in scenario["audit_events"])
+
+    accept_response = client.post(
+        "/_dash-update-component",
+        json={
+            "output": review_key,
+            "outputs": [
+                {"id": "operator-state-store", "property": "data"},
+                {"id": "operator-state-badge", "property": "children"},
+                {"id": "recovery-status-badge", "property": "children"},
+                {"id": "workflow-activity-note", "property": "children"},
+            ],
+            "changedPropIds": ["accept-plan-btn.n_clicks"],
+            "inputs": [
+                {"id": "mark-reviewed-btn", "property": "n_clicks", "value": 1},
+                {"id": "accept-plan-btn", "property": "n_clicks", "value": 1},
+                {"id": "override-plan-btn", "property": "n_clicks", "value": 0},
+            ],
+            "state": [
+                {"id": "scenario-id-store", "property": "data", "value": scenario_id},
+                {"id": "selected-recovery-store", "property": "data", "value": selected_recovery_store},
+            ],
+        },
+    )
+    assert accept_response.status_code == 200
+    accept_payload = accept_response.get_json()["response"]
+    assert accept_payload["recovery-status-badge"]["children"] == "PLAN ACCEPTED"
+
+    scenario = platform.get_scenario(scenario_id)
+    assert scenario is not None
+    assert scenario["state"] == "ACCEPTED"
