@@ -1,24 +1,62 @@
-name: ci
+name: CI
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve Python version
+        id: python-version
+        run: |
+          VERSION="$(sed 's/^python-//' runtime.txt)"
+          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ steps.python-version.outputs.value }}
+          cache: pip
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Compile
         run: |
-          python -m py_compile app.py server.py ops/*.py engine/*.py ui/*.py tests/*.py
+          python - <<'PY'
+          import pathlib
+          import py_compile
+          
+          paths = []
+          for folder in ("engine", "ops", "ui", "tests"):
+              paths.extend(sorted(pathlib.Path(folder).glob("*.py")))
+          for extra in ("app.py", "server.py", "gunicorn.conf.py", "sitecustomize.py"):
+              path = pathlib.Path(extra)
+              if path.exists():
+                  paths.append(path)
+          
+          for path in paths:
+              py_compile.compile(str(path), doraise=True)
+          
+          print(f"compiled {len(paths)} files")
+          PY
+      - name: Smoke deployed entrypoint
+        run: |
+          python - <<'PY'
+          import server
+          
+          client = server.server.test_client()
+          response = client.get("/healthz")
+          assert response.status_code == 200, response.status_code
+          payload = response.get_json()
+          assert payload["status"] in {"NOMINAL", "DEGRADED", "FAILED"}
+          print("healthz ok")
+          PY
       - name: Test
         run: |
           pytest -q
