@@ -68,11 +68,13 @@ def create_app(df: pd.DataFrame, graph, platform=None):
     )
     initial_graph_elements = []
     initial_graph_stylesheet = build_cyto_stylesheet()
+    system_status_label = platform.health_snapshot()["status"]
     app.layout = build_layout(
-        flight_options,
-        platform.data_quality.source_label,
+        flight_options=flight_options,
+        system_status_label=system_status_label,
+        data_source_label=platform.data_quality.source_label,
         data_health_label=platform.data_quality.status,
-        ops_mode_label=f"{platform.data_quality.mode} · {platform.settings.model_version}",
+        data_mode_label=platform.data_quality.mode,
         initial_graph_elements=initial_graph_elements,
         initial_graph_stylesheet=initial_graph_stylesheet,
     )

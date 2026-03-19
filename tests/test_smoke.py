@@ -49,6 +49,24 @@ def _find_component(root, *, component_id=None, class_name=None):
         if match is not None:
             return match
     return None
+
+
+def _collect_text(root):
+    if root is None:
+        return []
+    if isinstance(root, str):
+        return [root]
+    values = []
+    children = getattr(root, "children", None)
+    if children is None:
+        return values
+    if not isinstance(children, (list, tuple)):
+        children = [children]
+    for child in children:
+        values.extend(_collect_text(child))
+    return values
+
+
 @pytest.fixture(scope="module")
 def schedule_df():
     return load_schedule(datetime.now(timezone.utc), use_opensky=False)
@@ -85,6 +103,16 @@ def test_app_starts_with_graph_in_standby_mode(schedule_df, dependency_graph):
     assert empty_state is not None
     assert graph.elements == []
     assert empty_state.style == {"display": "flex"}
+
+
+def test_app_header_reflects_runtime_mode_and_source(schedule_df, dependency_graph):
+    app = create_app(schedule_df, dependency_graph)
+    text_values = set(_collect_text(app.layout))
+
+    assert "DEGRADED" in text_values
+    assert "FALLBACK" in text_values
+    assert "FALLBACK MODE" in text_values
+    assert "SYNTHETIC SCHEDULE" in text_values
 
 
 def test_panel_headers_wrap_actions_in_flex_containers(schedule_df, dependency_graph):

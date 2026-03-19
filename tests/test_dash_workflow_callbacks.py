@@ -161,7 +161,7 @@ def test_dash_callback_workflow_round_trip(tmp_path):
     )
     assert review_response.status_code == 200
     review_payload = review_response.get_json()["response"]
-    assert review_payload["recovery-status-badge"]["children"] == "UNDER REVIEW"
+    assert review_payload["recovery-status-badge"]["children"] == "REVIEWED"
 
     scenario = platform.get_scenario(scenario_id)
     assert scenario is not None

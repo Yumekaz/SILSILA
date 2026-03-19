@@ -30,11 +30,42 @@ def _status_color(status: str) -> str:
         return "#00D4A0"
     if status in {"PARTIAL", "MEDIUM", "HYBRID", "RECOMMENDED", "REVIEWED"}:
         return "#E8A020"
-    if status in {"DEGRADED", "LOW", "OVERRIDDEN"}:
+    if status in {"DEGRADED", "LOW", "OVERRIDDEN", "FALLBACK"}:
         return "#FF6B35"
     if status in {"FAILED", "ACCEPTED"}:
         return "#FF3D5A"
     return "#8CA0C0"
+
+
+def _display_data_source_label(source_label: str) -> str:
+    normalized = (source_label or "").strip().upper()
+    if not normalized:
+        return "UNKNOWN SOURCE"
+    if "HYBRID" in normalized:
+        return "PUBLIC + SYNTHETIC"
+    if normalized.startswith("OPENSKY"):
+        return "PUBLIC ARRIVALS"
+    if "SYNTHETIC" in normalized:
+        return "SYNTHETIC SCHEDULE"
+    return normalized
+
+
+def _display_data_mode_label(mode_label: str) -> str:
+    normalized = (mode_label or "").strip().upper()
+    return {
+        "LIVE": "LIVE MODE",
+        "HYBRID": "HYBRID MODE",
+        "FALLBACK": "FALLBACK MODE",
+    }.get(normalized, normalized or "UNKNOWN MODE")
+
+
+def _status_badge_style(status: str) -> dict:
+    color = _status_color(status)
+    return {
+        "color": color,
+        "borderColor": color,
+        "background": "rgba(12, 18, 32, 0.85)",
+    }
 
 
 
@@ -71,8 +102,10 @@ def empty_gantt_fig() -> go.Figure:
 
 # ─── Header ───────────────────────────────────────────────────────────────────
 
-def build_header(data_source_label: str, data_health_label: str, ops_mode_label: str) -> html.Div:
+def build_header(system_status_label: str, data_source_label: str, data_health_label: str, data_mode_label: str) -> html.Div:
+    system_status_color = _status_color(system_status_label)
     data_health_color = _status_color(data_health_label)
+    data_mode_color = _status_color(data_mode_label)
     return html.Div(className="app-header", children=[
         html.Div(className="header-brand", children=[
             html.Div(className="brand-title", children=[
@@ -84,11 +117,11 @@ def build_header(data_source_label: str, data_health_label: str, ops_mode_label:
             html.Div(className="indicator", children=[
                 html.Div("SYSTEM", className="ind-label"),
                 html.Div([
-                    html.Span(className="status-dot"),
-                    html.Span("NOMINAL", style={"color": "#00D4A0",
-                                                "fontFamily": "JetBrains Mono",
-                                                "fontSize": "13px",
-                                                "fontWeight": "600"})
+                    html.Span(className="status-dot", style={"background": system_status_color, "boxShadow": f"0 0 8px {system_status_color}"}),
+                    html.Span(system_status_label, style={"color": system_status_color,
+                                                          "fontFamily": "JetBrains Mono",
+                                                          "fontSize": "13px",
+                                                          "fontWeight": "600"})
                 ]),
             ]),
             html.Div(className="indicator", children=[
@@ -97,11 +130,11 @@ def build_header(data_source_label: str, data_health_label: str, ops_mode_label:
             ]),
             html.Div(className="indicator", children=[
                 html.Div("DATA SOURCE", className="ind-label"),
-                html.Div(data_source_label, className="ind-value", style={"fontSize": "11px"}),
+                html.Div(_display_data_source_label(data_source_label), className="ind-value", style={"fontSize": "11px"}),
             ]),
             html.Div(className="indicator", children=[
                 html.Div("OPS MODE", className="ind-label"),
-                html.Div(ops_mode_label, className="ind-value", style={"fontSize": "11px", "color": "#8CA0C0"}),
+                html.Div(_display_data_mode_label(data_mode_label), className="ind-value", style={"fontSize": "11px", "color": data_mode_color}),
             ]),
             html.Div(className="indicator", children=[
                 html.Div("LOCAL TIME (AST)", className="ind-label"),
@@ -114,11 +147,11 @@ def build_header(data_source_label: str, data_health_label: str, ops_mode_label:
 
 # ─── Control Panel (Left) ─────────────────────────────────────────────────────
 
-def build_control_panel(flight_options: list) -> html.Div:
+def build_control_panel(flight_options: list, data_mode_label: str) -> html.Div:
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
             html.Span("DISRUPTION INPUT", className="panel-title"),
-            html.Span("LIVE", className="panel-badge"),
+            html.Span((data_mode_label or "LOCAL").upper(), className="panel-badge", style=_status_badge_style(data_mode_label)),
         ]),
         html.Div(className="panel-body", children=[
 
@@ -177,11 +210,11 @@ def build_control_panel(flight_options: list) -> html.Div:
 
             html.Div(className="divider"),
             html.Div(className="control-helper-card", children=[
-                html.Div("RUNBOOK", className="control-label"),
-                html.Div("1. Select inbound trigger", className="control-helper-line"),
-                html.Div("2. Simulate cascade impact", className="control-helper-line"),
-                html.Div("3. Review ranked recovery options", className="control-helper-line"),
-                html.Div("4. Record operator decision", className="control-helper-line"),
+                html.Div("OPERATOR FLOW", className="control-label"),
+                html.Div("1. Choose inbound trigger", className="control-helper-line"),
+                html.Div("2. Run cascade simulation", className="control-helper-line"),
+                html.Div("3. Compare recovery plans", className="control-helper-line"),
+                html.Div("4. Approve or override", className="control-helper-line"),
             ]),
         ]),
     ])
@@ -257,7 +290,7 @@ def build_cascade_log_panel() -> html.Div:
             html.Div(id="summary-metrics"),
             html.Div(className="cascade-feed-head", children=[
                 html.Div("EVENT FEED", className="control-label"),
-                html.Div("Ordered by highest propagated delay and severity.", className="cascade-feed-copy"),
+                html.Div("Highest-impact events first.", className="cascade-feed-copy"),
             ]),
             html.Div(className="cascade-log-scroll", id="cascade-log", children=[
                 html.Div(className="log-empty", children=[
@@ -308,7 +341,7 @@ def build_recovery_panel() -> html.Div:
                 html.Div(className="log-empty", children=[
                     html.Div("◈", className="icon"),
                     html.Div("RUN SIMULATION FIRST"),
-                    html.Div("Recovery options appear after cascade analysis",
+                    html.Div("Run a simulation to generate recovery plans.",
                              style={"opacity": "0.5", "textTransform": "none", "letterSpacing": "0"}),
                 ])
             ]
@@ -396,16 +429,17 @@ def build_sensitivity_panel() -> html.Div:
 
 def build_layout(
     flight_options: list,
+    system_status_label: str,
     data_source_label: str,
     data_health_label: str,
-    ops_mode_label: str,
+    data_mode_label: str,
     initial_graph_elements: list | None = None,
     initial_graph_stylesheet: list | None = None,
 ) -> html.Div:
     return html.Div([
-        build_header(data_source_label, data_health_label, ops_mode_label),
+        build_header(system_status_label, data_source_label, data_health_label, data_mode_label),
         html.Div(className="main-grid", children=[
-            build_control_panel(flight_options),
+            build_control_panel(flight_options, data_mode_label),
             build_network_panel(initial_graph_elements, initial_graph_stylesheet),
             build_cascade_log_panel(),
         ]),

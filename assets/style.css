@@ -1277,12 +1277,15 @@ button:disabled {
 
 .impact-overview-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 
 .impact-headline-block {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .impact-kicker {
@@ -1293,25 +1296,25 @@ button:disabled {
 }
 
 .impact-headline {
-  margin-top: 4px;
   font-family: var(--font-head);
-  font-size: 25px;
-  line-height: 1.05;
-  letter-spacing: 0.03em;
+  font-size: 21px;
+  line-height: 1.12;
+  letter-spacing: 0.02em;
   color: var(--text-1);
+  max-width: 18ch;
+  text-wrap: balance;
 }
 
 .impact-subhead {
-  margin-top: 8px;
   font-family: var(--font-body);
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+  color: #b4c3db;
 }
 
 .impact-severity-board {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1332,7 +1335,7 @@ button:disabled {
 .mini-stat-value {
   margin-top: 3px;
   font-family: var(--font-data);
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
 }
 
@@ -1379,15 +1382,15 @@ button:disabled {
 
 .impact-summary-blurb {
   font-family: var(--font-body);
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.6;
+  color: #d5deed;
 }
 
 .impact-rationale {
   font-family: var(--font-data);
-  font-size: 10px;
-  line-height: 1.6;
+  font-size: 11px;
+  line-height: 1.55;
   color: var(--text-3);
 }
 

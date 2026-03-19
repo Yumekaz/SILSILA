@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from io import StringIO
 import json
 
 from dash import html
@@ -17,11 +16,11 @@ def recovery_status_badge_text(state: str | None, has_selection: bool, has_optio
     if normalized == "AWAITING CASCADE":
         return "AWAITING CASCADE"
     if normalized == "SIMULATED":
-        return "OPTIONS READY" if has_options else "NO OPTIONS"
+        return "OPTIONS READY" if has_options else "NO VIABLE PLAN"
     if normalized == "RECOMMENDED":
         return "PLAN SELECTED" if has_selection else "OPTIONS READY"
     if normalized == "REVIEWED":
-        return "UNDER REVIEW"
+        return "REVIEWED"
     if normalized == "ACCEPTED":
         return "PLAN ACCEPTED"
     if normalized == "OVERRIDDEN":
@@ -72,8 +71,8 @@ def build_cascade_log(result, colors: dict) -> list:
     if not result.events:
         return [html.Div(className="log-empty", children=[
             html.Div("◎", className="icon"),
-            html.Div("NO CASCADE"),
-            html.Div("Delay absorbed within existing slack", style={"opacity": "0.5", "textTransform": "none"}),
+            html.Div("NO DOWNSTREAM IMPACT"),
+            html.Div("Current delay is absorbed within available slack.", style={"opacity": "0.5", "textTransform": "none"}),
         ])]
 
     items = []
@@ -139,7 +138,7 @@ def build_summary_metrics(result, colors: dict, confidence=None, data_quality=No
     return html.Div(className="impact-overview", children=[
         html.Div(className="impact-overview-head", children=[
             html.Div(className="impact-headline-block", children=[
-                html.Div("ACTIVE IMPACT PROFILE", className="impact-kicker"),
+                html.Div("CURRENT IMPACT", className="impact-kicker"),
                 html.Div(_impact_headline(summary), className="impact-headline"),
                 html.Div(_impact_subhead(summary), className="impact-subhead"),
             ]),
@@ -159,18 +158,17 @@ def build_summary_metrics(result, colors: dict, confidence=None, data_quality=No
 def build_optimizer_summary(optimization, colors: dict) -> html.Div:
     if not optimization.candidates:
         return html.Div()
-    frontier = ", ".join(optimization.frontier_labels) if optimization.frontier_labels else "—"
     best = optimization.candidates[0]
     return html.Div(className="optimizer-strip", children=[
         html.Div(className="optimizer-callout", children=[
-            html.Div("OPTIMIZER RECOMMENDATION", className="metric-key"),
+            html.Div("TOP RECOVERY PLAN", className="metric-key"),
             html.Div(optimization.best_label or "—", className="optimizer-title"),
-            html.Div("Best objective score across feasible recovery strategies.", className="optimizer-note"),
+            html.Div("Highest-ranked feasible recovery under the current scoring model.", className="optimizer-note"),
         ]),
         html.Div(className="optimizer-metrics", children=[
             _mini_stat("Objective", f"{best.objective_score:.3f}", "cyan"),
-            _mini_stat("Pareto", frontier, "gold"),
-            _mini_stat("State", "Replayable", "teal"),
+            _mini_stat("Frontier", f"{len(optimization.frontier_labels)} plans", "gold"),
+            _mini_stat("Scenario", "Saved", "teal"),
         ]),
     ])
 
@@ -186,7 +184,7 @@ def empty_log() -> list:
     ])]
 
 
-def empty_recovery_cards(message: str = "Recovery options appear after cascade analysis") -> list:
+def empty_recovery_cards(message: str = "Run a simulation to generate recovery plans.") -> list:
     return [html.Div(className="log-empty", children=[
         html.Div("◈", className="icon"),
         html.Div("RUN SIMULATION FIRST"),
@@ -231,9 +229,9 @@ def build_recovery_cards(options: list, colors: dict, selected_strategy: str | N
         "CANCEL": {"accent": "#FF3D5A", "icon": "X"},
     }
     score_labels = {
-        (80, 100): ("RECOMMENDED", "#00D4A0"),
+        (80, 100): ("TOP PLAN", "#00D4A0"),
         (50, 80): ("VIABLE", "#E8A020"),
-        (0, 50): ("COSTLY", "#FF6B35"),
+        (0, 50): ("HIGH COST", "#FF6B35"),
     }
 
     def score_badge(score):
@@ -264,18 +262,18 @@ def build_recovery_cards(options: list, colors: dict, selected_strategy: str | N
         else:
             card_classes = "recovery-card recovery-card-active" if is_selected else "recovery-card"
             button_classes = "rc-apply-btn rc-apply-btn-active" if is_selected else "rc-apply-btn"
-            button_label = "ACTIVE PLAN" if is_selected else f"APPLY {strategy_name}"
+            button_label = "CURRENT PLAN" if is_selected else "SELECT PLAN"
             recommendation = _option_value(option, "recommendation")
             pareto = bool(_option_value(option, "pareto_efficient", False))
             card = html.Div(className=card_classes, style={"borderTopColor": strategy["accent"]}, children=[
-                html.Div("SELECTED FOR DECISION" if is_selected else "RECOVERY OPTION", className="rc-active-banner"),
+                html.Div("SELECTED PLAN" if is_selected else "RECOVERY OPTION", className="rc-active-banner"),
                 html.Div(className="rc-header", children=[
                     html.Span(strategy["icon"], className="rc-icon", style={"color": strategy["accent"]}),
                     html.Span(option_label, className="rc-title", style={"color": strategy["accent"]}),
                     html.Span(label, className="rc-score-badge", style={"color": label_color, "borderColor": label_color}),
                 ]),
                 html.Div(
-                    recommendation or ("PARETO-EFFICIENT" if pareto else "DOMINATED TRADEOFF"),
+                    _display_recommendation(recommendation, pareto),
                     className="rc-desc",
                     style={"color": colors["teal"] if pareto else colors["text_3"], "marginTop": "6px", "fontSize": "11px"},
                 ),
@@ -436,29 +434,27 @@ def _option_value(option, key: str, default=None):
 def _impact_headline(summary: dict) -> str:
     flights = summary["flights_affected"]
     if flights == 0:
-        return "No downstream disruption beyond the trigger."
+        return "No downstream impact detected."
     if summary["critical_count"]:
-        return "Critical downstream disruption requires operator decision."
+        return "Critical impact. Recovery action required."
     if summary["cascade_depth"] >= 3:
-        return "Multi-hop cascade is active across the network."
-    return "Contained cascade detected with actionable recovery options."
+        return "Network disruption is spreading."
+    return "Contained impact. Recovery plans ready."
 
 
 def _impact_subhead(summary: dict) -> str:
-    return (
-        f"Trigger {summary['trigger']} injected +{int(summary['trigger_delay_min'])} minutes "
-        f"and reached {summary['flights_affected']} downstream flights."
-    )
+    flights = int(summary["flights_affected"])
+    return f"{summary['trigger']} +{int(summary['trigger_delay_min'])} min now affects {_count_phrase(flights, 'downstream flight')}."
 
 
 def _impact_brief(summary: dict) -> str:
     if summary["flights_affected"] == 0:
-        return "Current delay is being absorbed inside existing slack. Recovery action is optional."
+        return "Current delay is being absorbed within available slack. A recovery action is optional."
     if summary["critical_count"]:
-        return "At least one leg has crossed the critical threshold. Review the recommended recovery before accepting execution."
+        return "At least one downstream leg is in the critical band. Review and approve a recovery plan before execution."
     if summary["total_pax_stranded"]:
-        return f"{summary['total_pax_stranded']} passengers are currently stranded by connection failure. Recovery priority should favor passenger protection."
-    return "Cascade remains operationally manageable. Compare the top recovery options before committing a decision."
+        return f"{_count_phrase(summary['total_pax_stranded'], 'passenger')} currently exposed to a missed connection. Prioritize passenger protection in plan selection."
+    return "Current impact is limited. Review the recovery plans before approval."
 
 
 def _signal_chip(label: str, value: str, tone: str) -> html.Div:
@@ -473,3 +469,25 @@ def _mini_stat(label: str, value, tone: str) -> html.Div:
         html.Div(label.upper(), className="mini-stat-label"),
         html.Div(str(value), className="mini-stat-value"),
     ])
+
+
+def _count_phrase(count: int | float, singular: str, plural: str | None = None) -> str:
+    value = int(count)
+    noun = singular if value == 1 else (plural or f"{singular}s")
+    return f"{value} {noun}"
+
+
+def _display_recommendation(recommendation: str | None, pareto_efficient: bool) -> str:
+    normalized = (recommendation or "").strip().upper()
+    replacements = {
+        "PARETO": "FRONTIER OPTION",
+        "PARETO-EFFICIENT": "FRONTIER OPTION",
+        "PARETO · TOP SCORE": "FRONTIER · TOP SCORE",
+        "DOMINATED": "LOWER-RANKED OPTION",
+        "DOMINATED TRADEOFF": "LOWER-RANKED OPTION",
+    }
+    if normalized in replacements:
+        return replacements[normalized]
+    if recommendation:
+        return recommendation
+    return "FRONTIER OPTION" if pareto_efficient else "LOWER-RANKED OPTION"

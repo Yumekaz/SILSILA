@@ -47,7 +47,7 @@ def test_status_class_helpers_map_known_states():
     assert recovery_status_badge_class("RECOMMENDED", True, True).endswith("status-recommended")
     assert recovery_status_badge_class("OVERRIDDEN", False, True).endswith("status-overridden")
     assert recovery_status_badge_text("RECOMMENDED", True, True) == "PLAN SELECTED"
-    assert recovery_status_badge_text("REVIEWED", True, True) == "UNDER REVIEW"
+    assert recovery_status_badge_text("REVIEWED", True, True) == "REVIEWED"
 
 
 def test_selected_strategy_is_parsed_and_active_card_is_disabled():
@@ -81,4 +81,4 @@ def test_selected_strategy_is_parsed_and_active_card_is_disabled():
 
     assert "recovery-card-active" in card.className
     assert button.disabled is True
-    assert button.children == "ACTIVE PLAN"
+    assert button.children == "CURRENT PLAN"

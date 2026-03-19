@@ -1,219 +1,136 @@
 # SILSILA
 
-SILSILA is a systems-engineering simulation of flight-disruption propagation at Hamad International Airport (DOH/OTHH). It models how an inbound delay can spread through aircraft rotations, simplified crew dependencies, and passenger connections, then compares recovery actions, runs Monte Carlo risk scenarios, and exports a report.
+SILSILA is an airline-operations simulation platform for analyzing how inbound delays propagate through a hub-and-spoke network and how different recovery actions change the outcome. The current implementation is modeled around Hamad International Airport (`DOH/OTHH`) and combines disruption propagation, recovery tradeoff analysis, operator workflow, risk simulation, and reporting in a single system.
 
-The project is designed as a transparent decision-support prototype. It is not an airline-certified operational optimizer, but it is no longer just a dashboard demo: it contains a graph model, propagation engine, discrete recovery optimizer, sensitivity analysis, regression tests, and a structured documentation package.
+## Overview
 
-## Scope
+The system starts from a daily flight schedule, constructs a dependency graph across flights, then answers a practical operational question:
 
-The system currently supports:
+> If this inbound flight is delayed, which downstream legs are affected, how severe is the cascade, and what is the best recovery action under the current assumptions?
 
-- daily Doha schedule loading
-- graph construction across flights and dependencies
-- cascade simulation from an inbound trigger
-- recovery evaluation for swap, compress/absorb, and cancel actions
-- discrete optimization across feasible recovery candidates
-- Pareto-front tradeoff analysis
-- Monte Carlo network-risk analysis
-- turnaround sensitivity analysis
-- PDF report export
-
-## Technical Positioning
-
-This repository should be described as:
-
-`A systems-engineering disruption simulator for a hub-and-spoke airline network, with recovery tradeoff analysis, risk simulation, and report generation.`
-
-That is an accurate claim.
-
-## What Makes It More Than A Demo
-
-- Core state lives in explicit schedule, graph, cascade, and recovery models.
-- Recovery is no longer ranked only by hand-tuned heuristic score. A discrete optimization layer now minimizes a weighted objective across feasible actions.
-- Recovery options also expose Pareto-efficient tradeoffs rather than pretending there is always one obvious best answer.
-- Sensitivity analysis is implemented as an actual analysis path, not only as documentation.
-- Validation, historical benchmarking, and deployment artifacts exist in the repository.
-- Cost assumptions are now routed through a documented calibration layer rather than only hand-tuned constants.
-- Historical validation now includes a five-case public benchmark harness with tolerance scoring.
-
-## Key Features
-
-### 1. Dependency Graph
-
-Flights are modeled as nodes. Edges represent:
+SILSILA models three disruption channels:
 
 - aircraft rotation dependencies
-- crew handover dependencies
+- simplified crew dependencies
 - passenger connection dependencies
 
-Relevant files:
-
-- [`engine/graph_builder.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/graph_builder.py)
-- [`engine/data_loader.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/data_loader.py)
-
-### 2. Cascade Simulation
-
-Given an inbound trigger flight and a delay magnitude, the engine propagates disruption through the dependency graph and computes:
-
-- affected flights
-- propagated delay
-- stranded passengers
-- estimated cost
-- propagation depth and path
-
-Relevant file:
-
-- [`engine/cascade.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/cascade.py)
-
-### 3. Recovery Layer
-
-The recovery layer evaluates:
+It then evaluates three recovery classes:
 
 - `SWAP`
 - `DELAY`
 - `CANCEL`
 
-Each candidate carries:
+The output is surfaced through an operator-facing dashboard, a backend service/API layer, persistent scenario history, audit logs, and exportable reporting.
 
-- residual delay
-- net cost
-- passenger impact
-- action log
-- Pareto efficiency tag
+## Core Capabilities
 
-Relevant file:
+- Directed dependency graph construction over a daily hub schedule
+- Multi-hop disruption propagation with cost, passenger, and severity metrics
+- Recovery evaluation across multiple candidate actions
+- Discrete optimization and Pareto-tradeoff labeling for recovery options
+- Monte Carlo network-risk analysis
+- Turnaround sensitivity analysis
+- Persistent scenarios, workflow state, and audit trail
+- PDF export and deployment-ready runtime configuration
 
-- [`engine/recovery.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/recovery.py)
+## System Flow
 
-### 4. Optimization Layer
-
-The repository now includes a discrete optimization step over feasible recovery candidates. The optimizer minimizes a weighted objective across:
-
-- residual net cost
-- residual delay
-- stranded passengers
-
-This is not a full airline OR solver, but it is a real optimization layer over candidate actions rather than pure score ordering.
-
-Relevant file:
-
-- [`engine/optimizer.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/optimizer.py)
-
-### 5. Monte Carlo Risk Analysis
-
-The app can run multi-scenario disruption analysis and produce:
-
-- cascade cost distribution
-- sampled delay distribution
-- risk heatmap
-- network summary metrics
-
-Relevant file:
-
-- [`engine/monte_carlo.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/monte_carlo.py)
-
-### 6. Sensitivity Analysis
-
-The app includes turnaround sensitivity analysis, showing how cascade severity changes as the assumed minimum turnaround requirement is tightened or relaxed.
-
-Relevant file:
-
-- [`engine/sensitivity.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/sensitivity.py)
-
-### 7. Reporting
-
-The system exports a PDF report covering:
-
-- cascade summary
-- recovery comparison
-- Monte Carlo summary
-- flight risk profiles
-- integration note
-
-Relevant file:
-
-- [`engine/pdf_report.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/pdf_report.py)
-
-## User Interface
-
-The dashboard includes:
-
-- inbound trigger selector
-- delay input controls
-- interactive network graph
-- cascade event log
-- Gantt schedule view
-- recovery cards
-- optimizer summary
-- Monte Carlo panel
-- sensitivity-analysis panel
-- PDF export action
-
-Relevant files:
-
-- [`ui/layout.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/layout.py)
-- [`ui/callbacks_core.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/callbacks_core.py)
-- [`ui/callbacks_phase3.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/callbacks_phase3.py)
-- [`ui/session_state.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/ui/session_state.py)
-
-## Data Path
-
-The data path is intentionally explicit:
-
-- OpenSky support exists for public arrival data
-- the application still falls back to a synthetic but internally consistent hub schedule when the public data path is incomplete
-- schedule provenance is now carried in `DataFrame.attrs["data_source"]` and surfaced in the UI header
-
-This is a pragmatic compromise: the app remains runnable while documenting when it is using a partial public-data path versus a modeled schedule.
-
-## Validation
-
-The repository includes automated tests, internal validation helpers, and a public-case historical benchmark harness.
-
-Automated checks currently cover:
-
-- schedule schema and provenance
-- schedule validation reports
-- graph validation reports
-- rotation-edge slack correctness
-- cascade propagation behavior
-- recovery regressions
-- optimizer behavior
-- Monte Carlo output shape
-- sensitivity-analysis behavior
-- PDF generation
-- state serialization
-- historical validation benchmark regressions
-
-Run:
-
-```bash
-pytest -q
+```mermaid
+flowchart LR
+    A["Schedule Loader"] --> B["Dependency Graph"]
+    B --> C["Cascade Engine"]
+    C --> D["Recovery Evaluation"]
+    D --> E["Optimizer / Pareto Layer"]
+    E --> F["Dashboard"]
+    E --> G["API + Persistence"]
+    E --> H["PDF Report"]
+    G --> I["Audit Log + Scenario History"]
 ```
 
-Relevant files:
+## Architecture
 
-- [`engine/validation.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/validation.py)
-- [`engine/historical_validation.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/engine/historical_validation.py)
-- [`tests/test_smoke.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/tests/test_smoke.py)
-- [`tests/test_historical_validation.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/tests/test_historical_validation.py)
+### Simulation Engine
 
-## Documentation Package
+The `engine/` package contains the domain logic:
 
-The repository includes a dedicated engineering documentation set under [`docs/`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs):
+- graph construction
+- cascade propagation
+- recovery modeling
+- optimization
+- Monte Carlo analysis
+- sensitivity analysis
+- report generation
+- validation and benchmarking
 
-- [`requirements.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/requirements.md)
-- [`functional_decomposition.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/functional_decomposition.md)
-- [`data_dictionary.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/data_dictionary.md)
-- [`ui_spec.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/ui_spec.md)
-- [`fmea.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/fmea.md)
-- [`verification_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/verification_validation.md)
-- [`historical_validation.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/historical_validation.md)
-- [`cost_calibration.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/cost_calibration.md)
-- [`deployment.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/deployment.md)
-- [`demo_assets.md`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/docs/demo_assets.md)
+Key files:
 
-## Setup
+- [`engine/graph_builder.py`](engine/graph_builder.py)
+- [`engine/cascade.py`](engine/cascade.py)
+- [`engine/recovery.py`](engine/recovery.py)
+- [`engine/optimizer.py`](engine/optimizer.py)
+- [`engine/monte_carlo.py`](engine/monte_carlo.py)
+- [`engine/sensitivity.py`](engine/sensitivity.py)
+- [`engine/pdf_report.py`](engine/pdf_report.py)
+
+### Application Layer
+
+The `ui/` package provides the operator console:
+
+- trigger-flight selection
+- delay controls
+- network visualization
+- event feed
+- recovery decision cards
+- workflow-state controls
+- Monte Carlo and sensitivity panels
+- export actions
+
+Key files:
+
+- [`ui/layout.py`](ui/layout.py)
+- [`ui/callbacks_core.py`](ui/callbacks_core.py)
+- [`ui/callbacks_phase3.py`](ui/callbacks_phase3.py)
+- [`ui/dashboard_views.py`](ui/dashboard_views.py)
+
+### Backend And Operations Layer
+
+The `ops/` package provides the platform services behind the UI:
+
+- scenario persistence
+- audit logging
+- workflow transitions
+- background jobs
+- health and metrics endpoints
+- runtime status and confidence reporting
+
+Key files:
+
+- [`ops/services.py`](ops/services.py)
+- [`ops/api.py`](ops/api.py)
+- [`ops/repository.py`](ops/repository.py)
+- [`ops/jobs.py`](ops/jobs.py)
+- [`ops/observability.py`](ops/observability.py)
+
+## Repository Layout
+
+```text
+engine/   Simulation, graph, recovery, optimizer, analysis, reporting
+ui/       Dash layout, callbacks, view builders, session-state helpers
+ops/      API, services, persistence, auth, jobs, observability
+tests/    Regression, workflow, ingestion, deployment, browser-smoke tests
+docs/     Requirements, validation, UI spec, calibration, deployment notes
+```
+
+## Data Model
+
+SILSILA supports two runtime data modes:
+
+- public/hybrid schedule construction using OpenSky arrivals where available
+- synthetic fallback schedule generation for deterministic local use and degraded-mode operation
+
+Schedule provenance is carried through the runtime and exposed in the application state, health endpoints, and UI.
+
+## Running Locally
 
 ### Windows PowerShell
 
@@ -235,42 +152,79 @@ python app.py
 
 Open `http://localhost:8050`.
 
+## Verification
+
+Run the full regression suite:
+
+```bash
+python -m pytest -q
+```
+
+The test suite covers:
+
+- schedule schema and provenance
+- graph construction and dependency integrity
+- cascade propagation behavior
+- recovery and optimizer regressions
+- callback and workflow-state transitions
+- ingestion fallback and runtime health behavior
+- deployment entrypoint and configuration checks
+- browser-level smoke coverage where supported by the environment
+
+Representative files:
+
+- [`tests/test_smoke.py`](tests/test_smoke.py)
+- [`tests/test_ops_platform.py`](tests/test_ops_platform.py)
+- [`tests/test_dash_workflow_callbacks.py`](tests/test_dash_workflow_callbacks.py)
+- [`tests/test_ingestion_reliability.py`](tests/test_ingestion_reliability.py)
+- [`tests/test_deployment_config.py`](tests/test_deployment_config.py)
+
 ## Deployment
 
-The repository includes:
+The repository is configured for deployment on Render.
 
-- [`render.yaml`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/render.yaml)
-- [`Procfile`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/Procfile)
-- [`runtime.txt`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/runtime.txt)
-- [`gunicorn.conf.py`](/c:/Users/Mihir/OneDrive/Desktop/doha_cascade/gunicorn.conf.py)
+Deployment assets:
 
-The current server entrypoint is:
+- [`render.yaml`](render.yaml)
+- [`Procfile`](Procfile)
+- [`runtime.txt`](runtime.txt)
+- [`gunicorn.conf.py`](gunicorn.conf.py)
+- [`server.py`](server.py)
+
+Current deployment model:
+
+- single web service
+- Gunicorn application server
+- persistent disk mounted at `/var/data`
+- SQLite runtime database at `/var/data/silsila_ops.db`
+- health probe at `/healthz`
+
+Entry point:
 
 ```bash
 gunicorn server:server --config gunicorn.conf.py
 ```
 
-Recommended platform: `Render`.
+Additional deployment notes:
 
-Current deployment shape:
+- [`docs/deployment.md`](docs/deployment.md)
+- [`docs/ops_runbook.md`](docs/ops_runbook.md)
 
-- Render web service
-- persistent disk mounted at `/var/data`
-- SQLite runtime database at `/var/data/silsila_ops.db`
-- health checks via `/healthz`
-- single-instance Gunicorn process with threaded workers
+## Documentation
 
-## Limitations
+Supporting engineering documentation lives under [`docs/`](docs/):
 
-The project still has important limits:
+- [`docs/requirements.md`](docs/requirements.md)
+- [`docs/functional_decomposition.md`](docs/functional_decomposition.md)
+- [`docs/data_dictionary.md`](docs/data_dictionary.md)
+- [`docs/ui_spec.md`](docs/ui_spec.md)
+- [`docs/fmea.md`](docs/fmea.md)
+- [`docs/verification_validation.md`](docs/verification_validation.md)
+- [`docs/historical_validation.md`](docs/historical_validation.md)
+- [`docs/cost_calibration.md`](docs/cost_calibration.md)
 
-- public real-data coverage is incomplete for full hub reconstruction
-- historical validation now includes a public five-case benchmark harness, but it is still not closed with airline-internal operational ground truth
-- cancellation economics are calibrated, but still not airline-internal finance truth
-- recovery optimization is discrete over candidate actions, not a network-wide mixed-integer optimizer
-- the repository does not include a confirmed live public deployment URL
-- the demo-assets folder is scaffolded but not yet populated with curated screenshots/video
+## Technical Scope
 
-These are real limitations and should be stated plainly.
+This repository is best understood as a systems-engineering and decision-support platform. It is designed to be inspectable, testable, and deployable, with explicit modeling assumptions and a clear separation between simulation, UI, and platform services.
 
-
+It is not positioned as an airline-certified production optimizer or a full network-wide operations research stack. The current architecture is optimized for clarity, simulation fidelity under explicit assumptions, and operator-facing usability.
