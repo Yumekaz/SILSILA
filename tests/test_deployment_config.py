@@ -14,6 +14,7 @@ def test_render_blueprint_includes_port_binding_and_persistent_disk():
     assert "mountPath: /var/data" in render_yaml
     assert "SILSILA_DB_PATH" in render_yaml
     assert "WEB_CONCURRENCY" in render_yaml
+    assert "maxShutdownDelaySeconds" not in render_yaml
     assert procfile == f"web: {start_command}"
 
 

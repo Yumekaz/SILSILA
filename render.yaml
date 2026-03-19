@@ -8,7 +8,6 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn server:server --config gunicorn.conf.py
     healthCheckPath: /healthz
-    maxShutdownDelaySeconds: 60
     disk:
       name: silsila-data
       mountPath: /var/data
