@@ -31,6 +31,13 @@ The repo now includes a Render Blueprint that:
 - stores the SQLite runtime DB at `/var/data/silsila_ops.db`
 - enables API, jobs, workflow, and metrics by default
 
+The repo also includes a free/demo Blueprint in `render-free.yaml` that:
+
+- deploys the same app on Render's `free` web instance type
+- avoids billing by removing the persistent disk
+- stores the SQLite DB in `/tmp/silsila_ops.db`
+- is suitable for demos only because local state is lost on restart, redeploy, or idle spin-down
+
 Current start command:
 
 ```bash
@@ -44,6 +51,8 @@ gunicorn server:server --config gunicorn.conf.py
 3. Let Render read `render.yaml`.
 4. Confirm the persistent disk mount at `/var/data`.
 5. Deploy.
+
+If you need a no-billing demo deploy, point the Blueprint path to `render-free.yaml` instead of `render.yaml`.
 
 After first deploy, verify:
 
@@ -74,3 +83,4 @@ Gunicorn tuning env vars are also supported:
 - Because persistent disks cannot scale horizontally on Render, this service should remain single-instance in the current architecture.
 - If public live data is unavailable, the app will degrade cleanly into synthetic fallback mode.
 - If you want a more serious multi-instance production deployment later, the repository layer should be migrated from SQLite to Postgres.
+- The free/demo Blueprint uses Render's ephemeral filesystem, so scenarios, audit logs, and job history are not durable.

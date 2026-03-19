@@ -18,6 +18,20 @@ def test_render_blueprint_includes_port_binding_and_persistent_disk():
     assert procfile == f"web: {start_command}"
 
 
+def test_render_free_blueprint_uses_ephemeral_storage_and_free_plan():
+    render_yaml = Path("render-free.yaml").read_text(encoding="utf-8")
+    start_command = "gunicorn server:server --config gunicorn.conf.py"
+
+    assert "runtime: python" in render_yaml
+    assert "plan: free" in render_yaml
+    assert start_command in render_yaml
+    assert "healthCheckPath: /healthz" in render_yaml
+    assert "disk:" not in render_yaml
+    assert "mountPath:" not in render_yaml
+    assert "SILSILA_DB_PATH" in render_yaml
+    assert "/tmp/silsila_ops.db" in render_yaml
+
+
 def test_gunicorn_config_reads_port_from_environment():
     gunicorn_conf = Path("gunicorn.conf.py").read_text(encoding="utf-8")
 
