@@ -9,6 +9,8 @@ services:
     startCommand: gunicorn server:server --config gunicorn.conf.py
     healthCheckPath: /healthz
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
       - key: SILSILA_DB_PATH
         value: /tmp/silsila_ops.db
       - key: SILSILA_ENVIRONMENT
