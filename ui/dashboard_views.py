@@ -224,27 +224,27 @@ def build_recovery_cards(options: list, colors: dict, selected_strategy: str | N
         return empty_recovery_cards()
 
     strategy_colors = {
-        "SWAP": {"accent": "#00C8FF", "icon": "<->"},
-        "DELAY": {"accent": "#E8A020", "icon": "T"},
-        "CANCEL": {"accent": "#FF3D5A", "icon": "X"},
+        "SWAP": {"accent": "#D0A7D9", "icon": "<->"},
+        "DELAY": {"accent": "#E6C78E", "icon": "T"},
+        "CANCEL": {"accent": "#FF7A86", "icon": "X"},
     }
     score_labels = {
-        (80, 100): ("TOP PLAN", "#00D4A0"),
-        (50, 80): ("VIABLE", "#E8A020"),
-        (0, 50): ("HIGH COST", "#FF6B35"),
+        (80, 100): ("TOP PLAN", "#75E0C0"),
+        (50, 80): ("VIABLE", "#E6C78E"),
+        (0, 50): ("HIGH COST", "#F3A074"),
     }
 
     def score_badge(score):
         for (lo, hi), badge in score_labels.items():
             if lo <= score <= hi:
                 return badge
-        return "REVIEW", "#8CA0C0"
+        return "REVIEW", "#82768A"
 
     cards = []
     for idx, option in enumerate(options):
         strategy_name = _option_value(option, "strategy", "UNKNOWN")
         option_label = _option_value(option, "label", "—")
-        strategy = strategy_colors.get(strategy_name, {"accent": "#8CA0C0", "icon": "?"})
+        strategy = strategy_colors.get(strategy_name, {"accent": "#82768A", "icon": "?"})
         score_value = float(_option_value(option, "score", 0) or 0)
         label, label_color = score_badge(score_value)
         feasible = bool(_option_value(option, "feasible", False))
@@ -395,7 +395,7 @@ def build_gantt(df: pd.DataFrame, result, colors: dict, recovery_label: str | No
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=90, r=10, t=4 if not recovery_label else 24, b=30),
         barmode="overlay",
-        title=dict(text=title_text, font=dict(family="Barlow Condensed", size=12, color="#00D4A0"), x=0.01) if recovery_label else {},
+        title=dict(text=title_text, font=dict(family="Barlow Condensed", size=12, color="#75E0C0"), x=0.01) if recovery_label else {},
         font=dict(family="JetBrains Mono", color=colors["text_2"], size=10),
         xaxis=dict(type="date", showgrid=True, gridcolor="rgba(28,45,72,0.6)", zeroline=False, tickfont=dict(size=9, color=colors["text_3"]), tickformat="%H:%M"),
         yaxis=dict(showgrid=False, zeroline=False, tickfont=dict(size=9, color=colors["text_3"]), autorange="reversed"),

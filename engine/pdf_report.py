@@ -31,11 +31,11 @@ C_NAVY   = colors.HexColor("#0C1220")
 C_BLUE   = colors.HexColor("#172039")
 C_GOLD   = colors.HexColor("#E8A020")
 C_CYAN   = colors.HexColor("#00C8FF")
-C_TEAL   = colors.HexColor("#00D4A0")
+C_TEAL   = colors.HexColor("#75E0C0")
 C_RED    = colors.HexColor("#FF3D5A")
 C_ORANGE = colors.HexColor("#FF6B35")
 C_TEXT   = colors.HexColor("#1A2A40")
-C_MUTED  = colors.HexColor("#4A6080")
+C_MUTED  = colors.HexColor("#82768A")
 C_LIGHT  = colors.HexColor("#EAF2FB")
 C_WHITE  = colors.white
 C_BLACK  = colors.black
@@ -54,7 +54,7 @@ def _build_styles():
             fontName="Helvetica", fontSize=13, textColor=C_GOLD,
             leading=18, alignment=TA_CENTER, spaceAfter=4),
         "cover_meta": ParagraphStyle("cover_meta",
-            fontName="Helvetica", fontSize=9, textColor=colors.HexColor("#8CA0C0"),
+            fontName="Helvetica", fontSize=9, textColor=colors.HexColor("#C3B9C7"),
             leading=14, alignment=TA_CENTER),
         "section_title": ParagraphStyle("section_title",
             fontName="Helvetica-Bold", fontSize=14, textColor=C_NAVY,

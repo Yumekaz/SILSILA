@@ -17,35 +17,35 @@ import pandas as pd
 
 # ── Brand colours (mirror CSS variables) ──────────────────────────────────────
 C = {
-    "bg_1":    "#0C1220",
-    "bg_2":    "#111B30",
-    "bg_3":    "#172039",
-    "border":  "#1C2D48",
-    "gold":    "#E8A020",
-    "gold_dim":"#9B6B14",
-    "cyan":    "#00C8FF",
-    "cyan_dim":"#006A87",
-    "teal":    "#00D4A0",
-    "red":     "#FF3D5A",
-    "orange":  "#FF6B35",
-    "text_1":  "#E4EBF7",
-    "text_2":  "#8CA0C0",
-    "text_3":  "#4A6080",
+    "bg_1":    "#14121B",
+    "bg_2":    "#1C1826",
+    "bg_3":    "#282034",
+    "border":  "#3B2D49",
+    "gold":    "#E6C78E",
+    "gold_dim":"#8E7045",
+    "cyan":    "#D0A7D9",
+    "cyan_dim":"#765A7E",
+    "teal":    "#75E0C0",
+    "red":     "#FF7A86",
+    "orange":  "#F3A074",
+    "text_1":  "#F6F0EB",
+    "text_2":  "#C3B9C7",
+    "text_3":  "#82768A",
     # node status
-    "normal":    "#1C3A6A",
-    "trigger":   "#00C8FF",
-    "delayed":   "#E8A020",
-    "delayed_h": "#FF6B35",
-    "critical":  "#FF3D5A",
-    "landed":    "#1A4A3A",
-    "recovered": "#1A7A4A",
-    "cancelled": "#4A1A2A",
+    "normal":    "#3C2E53",
+    "trigger":   "#D0A7D9",
+    "delayed":   "#E6C78E",
+    "delayed_h": "#F3A074",
+    "critical":  "#FF7A86",
+    "landed":    "#2C6656",
+    "recovered": "#21856A",
+    "cancelled": "#642C3B",
 }
 
 # Canvas coordinate scale: 1 hour = HOUR_PX pixels on X axis
-HOUR_PX  = 120
+HOUR_PX  = 34
 # Each aircraft row = ROW_PX pixels apart on Y axis
-ROW_PX   = 80
+ROW_PX   = 44
 
 
 def build_cyto_elements(
@@ -123,7 +123,7 @@ def build_cyto_elements(
 
         # Node size proportional to pax
         pax  = data.get("pax", 100)
-        size = 22 + int((pax / 517) * 26)   # 22–48px range
+        size = 38 + int((pax / 517) * 18)   # 38–56px range
 
         elements.append({
             "data": {
@@ -192,20 +192,22 @@ def build_cyto_stylesheet() -> list:
             "style": {
                 "width":              "data(size)",
                 "height":             "data(size)",
+                "shape":              "roundrectangle",
                 "background-color":   C["normal"],
                 "border-width":       2,
                 "border-color":       C["border"],
                 "label":              "data(label)",
                 "font-family":        "Barlow Condensed, sans-serif",
-                "font-size":          11,
+                "font-size":          10,
                 "font-weight":        700,
                 "color":              C["text_2"],
-                "text-valign":        "top",
+                "text-valign":        "center",
                 "text-halign":        "center",
-                "text-margin-y":      -4,
+                "text-margin-y":      0,
                 "text-outline-width": 2,
                 "text-outline-color": C["bg_1"],
                 "z-index":            10,
+                "padding":            5,
                 "transition-property":"background-color border-color",
                 "transition-duration":"0.2s",
             },
@@ -218,7 +220,10 @@ def build_cyto_stylesheet() -> list:
                 "border-color":     C["cyan"],
                 "border-width":     3,
                 "color":            C["bg_1"],
-                "font-size":        13,
+                "font-size":        12,
+                "shape":            "roundrectangle",
+                "width":            64,
+                "height":           38,
                 "z-index":          50,
             },
         },

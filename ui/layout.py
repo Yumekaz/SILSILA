@@ -27,14 +27,14 @@ def _label(text: str) -> html.Div:
 def _status_color(status: str) -> str:
     status = (status or "").upper()
     if status in {"NOMINAL", "HIGH", "LIVE"}:
-        return "#00D4A0"
+        return "#75E0C0"
     if status in {"PARTIAL", "MEDIUM", "HYBRID", "RECOMMENDED", "REVIEWED"}:
-        return "#E8A020"
+        return "#E6C78E"
     if status in {"DEGRADED", "LOW", "OVERRIDDEN", "FALLBACK"}:
-        return "#FF6B35"
+        return "#F3A074"
     if status in {"FAILED", "ACCEPTED"}:
-        return "#FF3D5A"
-    return "#8CA0C0"
+        return "#FF7A86"
+    return "#82768A"
 
 
 def _display_data_source_label(source_label: str) -> str:
@@ -64,7 +64,7 @@ def _status_badge_style(status: str) -> dict:
     return {
         "color": color,
         "borderColor": color,
-        "background": "rgba(12, 18, 32, 0.85)",
+        "background": "rgba(28, 24, 38, 0.88)",
     }
 
 
@@ -90,10 +90,10 @@ def empty_gantt_fig() -> go.Figure:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=120, r=20, t=10, b=40),
-        font=dict(family="JetBrains Mono", color="#8CA0C0", size=11),
+        font=dict(family="JetBrains Mono", color="#82768A", size=11),
         xaxis=dict(
-            showgrid=True, gridcolor="rgba(28,45,72,0.8)", zeroline=False,
-            tickfont=dict(size=10), color="#4A6080"
+            showgrid=True, gridcolor="rgba(59,45,73,0.7)", zeroline=False,
+            tickfont=dict(size=10), color="#82768A"
         ),
         yaxis=dict(showgrid=False, zeroline=False, tickfont=dict(size=10)),
     )
@@ -111,7 +111,7 @@ def build_header(system_status_label: str, data_source_label: str, data_health_l
             html.Div(className="brand-title", children=[
                 html.Span("SIL"), "SILA"
             ]),
-            html.Div("HAMAD INTL · DOH/OTHH · OPS COMMAND", className="brand-sub"),
+            html.Div("DOHA NETWORK CONTROL · 24 / 7", className="brand-sub"),
         ]),
         html.Div(className="header-indicators", children=[
             html.Div(className="indicator", children=[
@@ -150,13 +150,13 @@ def build_header(system_status_label: str, data_source_label: str, data_health_l
 def build_control_panel(flight_options: list, data_mode_label: str) -> html.Div:
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
-            html.Span("DISRUPTION INPUT", className="panel-title"),
+            html.Span("SCENARIO BRIEF", className="panel-title"),
             html.Span((data_mode_label or "LOCAL").upper(), className="panel-badge", style=_status_badge_style(data_mode_label)),
         ]),
         html.Div(className="panel-body", children=[
 
             html.Div(className="control-section", children=[
-                _label("SELECT TRIGGER FLIGHT"),
+                _label("WATCHLIST FLIGHT"),
                 dcc.Dropdown(
                     id="flight-select",
                     options=flight_options,
@@ -164,9 +164,9 @@ def build_control_panel(flight_options: list, data_mode_label: str) -> html.Div:
                     clearable=False,
                     searchable=True,
                     style={
-                        "backgroundColor": "#111B30",
-                        "borderColor":     "#1C2D48",
-                        "color":           "#E4EBF7",
+                        "backgroundColor": "#1C1826",
+                        "borderColor":     "#3B2D49",
+                        "color":           "#F6F0EB",
                         "fontFamily":      "JetBrains Mono",
                         "fontSize":        "13px",
                     }
@@ -177,17 +177,17 @@ def build_control_panel(flight_options: list, data_mode_label: str) -> html.Div:
             html.Div(className="divider"),
 
             html.Div(className="control-section", children=[
-                _label("DELAY MAGNITUDE"),
+                _label("DISRUPTION WINDOW"),
                 html.Div("30 min", id="delay-display", className="delay-display"),
                 dcc.Slider(
                     id="delay-slider",
                     min=5, max=240, step=5, value=30,
                     marks={
-                        5:   {"label": "5m",   "style": {"color": "#4A6080", "fontSize": "9px"}},
-                        60:  {"label": "1h",   "style": {"color": "#4A6080", "fontSize": "9px"}},
-                        120: {"label": "2h",   "style": {"color": "#E8A020", "fontSize": "9px"}},
-                        180: {"label": "3h",   "style": {"color": "#FF6B35", "fontSize": "9px"}},
-                        240: {"label": "4h",   "style": {"color": "#FF3D5A", "fontSize": "9px"}},
+                        5:   {"label": "5m",   "style": {"color": "#82768A", "fontSize": "9px"}},
+                        60:  {"label": "1h",   "style": {"color": "#82768A", "fontSize": "9px"}},
+                        120: {"label": "2h",   "style": {"color": "#E6C78E", "fontSize": "9px"}},
+                        180: {"label": "3h",   "style": {"color": "#F3A074", "fontSize": "9px"}},
+                        240: {"label": "4h",   "style": {"color": "#FF7A86", "fontSize": "9px"}},
                     },
                     tooltip={"always_visible": False},
                 ),
@@ -196,13 +196,13 @@ def build_control_panel(flight_options: list, data_mode_label: str) -> html.Div:
             html.Div(className="divider"),
 
             html.Button(
-                "▶  SIMULATE CASCADE",
+                "▶  START SCENARIO",
                 id="trigger-btn",
                 className="trigger-btn",
                 n_clicks=0,
             ),
             html.Button(
-                "↺  RESET",
+                "↺  CLEAR BRIEF",
                 id="reset-btn",
                 className="reset-btn",
                 n_clicks=0,
@@ -210,11 +210,11 @@ def build_control_panel(flight_options: list, data_mode_label: str) -> html.Div:
 
             html.Div(className="divider"),
             html.Div(className="control-helper-card", children=[
-                html.Div("OPERATOR FLOW", className="control-label"),
-                html.Div("1. Choose inbound trigger", className="control-helper-line"),
-                html.Div("2. Run cascade simulation", className="control-helper-line"),
-                html.Div("3. Compare recovery plans", className="control-helper-line"),
-                html.Div("4. Approve or override", className="control-helper-line"),
+                html.Div("FLIGHT DESK RUNBOOK", className="control-label"),
+                html.Div("1. Choose a live arrival", className="control-helper-line"),
+                html.Div("2. Model the network ripple", className="control-helper-line"),
+                html.Div("3. Compare recovery moves", className="control-helper-line"),
+                html.Div("4. Approve the cleanest landing", className="control-helper-line"),
             ]),
         ]),
     ])
@@ -226,37 +226,41 @@ def build_network_panel(initial_elements: list | None = None, initial_stylesheet
     has_graph = bool(initial_elements)
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
-            html.Span("DOH HUB DEPENDENCY GRAPH", className="panel-title"),
+            html.Span("NETWORK LENS · DOH HUB", className="panel-title"),
             html.Div(className="panel-header-actions", children=[
                 html.Span("▸ ROTATION", className="tag",
-                          style={"color": "#00C8FF", "borderColor": "#006A87",
-                                 "background": "rgba(0,200,255,0.07)", "marginRight": "6px"}),
+                          style={"color": "#D0A7D9", "borderColor": "#765A7E",
+                                 "background": "rgba(208,167,217,0.10)", "marginRight": "6px"}),
                 html.Span("▸ CREW", className="tag",
-                          style={"color": "#00D4A0", "borderColor": "#00D4A0",
-                                 "background": "rgba(0,212,160,0.07)", "marginRight": "6px"}),
+                          style={"color": "#75E0C0", "borderColor": "#75E0C0",
+                                 "background": "rgba(117,224,192,0.10)", "marginRight": "6px"}),
                 html.Span("▸ PAX CNX", className="tag",
-                          style={"color": "#E8A020", "borderColor": "#9B6B14",
-                                 "background": "rgba(232,160,32,0.07)", "marginRight": "10px"}),
+                          style={"color": "#E6C78E", "borderColor": "#8E7045",
+                                 "background": "rgba(230,199,142,0.10)", "marginRight": "10px"}),
                 html.Span(id="cyto-node-info", style={
                     "fontFamily": "JetBrains Mono", "fontSize": "10px",
-                    "color": "#4A6080", "letterSpacing": "0.05em"
+                    "color": "#82768A", "letterSpacing": "0.05em"
                 }),
             ]),
         ]),
         html.Div(className="graph-container", children=[
+            html.Div(className="network-corner network-corner-tl", children=[html.Span("N", className="network-compass"), html.Span("LIVE / DOH", className="network-coord")]),
+            html.Div(className="network-corner network-corner-tr", children=[html.Span("FLIGHT FIELD", className="network-coord"), html.Span("24H", className="network-time")]),
+            html.Div(className="network-map-label", children=[html.Span("HUB / 01", className="network-map-kicker"), html.Span("NETWORK PULSE", className="network-map-title")]),
+            html.Div(className="network-map-footer", children=[html.Span("DRAG TO PAN", className="network-coord"), html.Span("SCROLL TO ZOOM", className="network-coord"), html.Span("12 ACTIVE LINKS", className="network-coord")]),
             html.Div(
                 id="graph-empty-state",
                 className="graph-empty-state",
                 style={"display": "none" if has_graph else "flex"},
                 children=[
                     html.Div(className="graph-empty-card", children=[
-                        html.Div("NETWORK STANDBY", className="graph-empty-title"),
+                        html.Div("MAP IS READY · NETWORK STANDBY", className="graph-empty-title"),
                         html.Div(
-                            "Select an inbound trigger flight and click SIMULATE CASCADE to render the impacted dependency paths.",
+                            "Choose a watchlist flight and start a scenario to reveal the ripple across aircraft, crew, and connections.",
                             className="graph-empty-body",
                         ),
                         html.Div(
-                            "The underlying hub network changes by flight selection, but highlighted links only appear after a simulated trigger.",
+                            "Every link is a decision surface. Follow the next departure at risk.",
                             className="graph-empty-caption",
                         ),
                     ]),
@@ -265,7 +269,7 @@ def build_network_panel(initial_elements: list | None = None, initial_stylesheet
             cyto.Cytoscape(
                 id="network-graph",
                 layout={"name": "preset"},
-                style={"height": "100%", "width": "100%", "background": "#06090F"},
+                style={"height": "100%", "width": "100%", "background": "#100D15"},
                 elements=initial_elements or [],
                 stylesheet=initial_stylesheet or [],
                 userZoomingEnabled=True,
@@ -283,20 +287,20 @@ def build_network_panel(initial_elements: list | None = None, initial_stylesheet
 def build_cascade_log_panel() -> html.Div:
     return html.Div(className="panel", children=[
         html.Div(className="panel-header", children=[
-            html.Span("CASCADE LOG", className="panel-title"),
+            html.Span("IMPACT RADAR", className="panel-title"),
             html.Span("0 AFFECTED", id="affected-count", className="panel-badge"),
         ]),
         html.Div(className="panel-body cascade-panel-body", children=[
             html.Div(id="summary-metrics"),
             html.Div(className="cascade-feed-head", children=[
-                html.Div("EVENT FEED", className="control-label"),
-                html.Div("Highest-impact events first.", className="cascade-feed-copy"),
+                html.Div("SIGNAL FEED", className="control-label"),
+                html.Div("Highest-risk movements first.", className="cascade-feed-copy"),
             ]),
             html.Div(className="cascade-log-scroll", id="cascade-log", children=[
                 html.Div(className="log-empty", children=[
                     html.Div("◌", className="icon"),
                     html.Div("AWAITING INPUT"),
-                    html.Div("Trigger and delay are loaded. Run SIMULATE CASCADE to create a scenario.",
+                    html.Div("Your flight brief is loaded. Start a scenario to light up the impact radar.",
                              style={"opacity": "0.5", "textTransform": "none",
                                      "letterSpacing": "0"}),
                 ])
@@ -310,8 +314,8 @@ def build_cascade_log_panel() -> html.Div:
 def build_gantt_panel() -> html.Div:
     return html.Div(className="bottom-panel", children=[
         html.Div(className="panel-header", children=[
-            html.Span("ROTATION TIMELINE · SCHEDULED vs CASCADED", className="panel-title"),
-            html.Span("GANTT", className="panel-badge"),
+            html.Span("SCHEDULE PULSE · PLAN vs REALITY", className="panel-title"),
+            html.Span("TIME HORIZON", className="panel-badge"),
         ]),
         html.Div(className="gantt-container", children=[
             dcc.Graph(
@@ -328,9 +332,9 @@ def build_gantt_panel() -> html.Div:
 def build_recovery_panel() -> html.Div:
     return html.Div(className="recovery-panel", id="recovery-panel", children=[
         html.Div(className="panel-header", children=[
-            html.Span("RECOVERY OPTIONS", className="panel-title"),
+            html.Span("RECOVERY DESK", className="panel-title"),
             html.Div(className="panel-header-actions", children=[
-                html.Span("RECOVERY", className="panel-badge", style={"marginRight": "6px"}),
+                html.Span("DECISION QUEUE", className="panel-badge", style={"marginRight": "6px"}),
                 html.Span("AWAITING CASCADE", className="panel-badge status-pill status-awaiting", id="recovery-status-badge"),
             ]),
         ]),
@@ -340,8 +344,8 @@ def build_recovery_panel() -> html.Div:
             children=[
                 html.Div(className="log-empty", children=[
                     html.Div("◈", className="icon"),
-                    html.Div("RUN SIMULATION FIRST"),
-                    html.Div("Run a simulation to generate recovery plans.",
+                    html.Div("AWAITING A SCENARIO"),
+                    html.Div("Start a scenario to generate recovery moves.",
                              style={"opacity": "0.5", "textTransform": "none", "letterSpacing": "0"}),
                 ])
             ]
@@ -352,13 +356,13 @@ def build_recovery_panel() -> html.Div:
         ]),
         html.Div(className="workflow-toolbar", children=[
             html.Div(className="workflow-status-block", children=[
-                html.Div("SCENARIO STATE", className="control-label"),
+                html.Div("OPERATOR DECISION", className="control-label"),
                 html.Div("AWAITING CASCADE", id="operator-state-badge", className="workflow-state-badge status-pill status-awaiting"),
             ]),
             html.Div(className="workflow-actions", children=[
                 html.Button("MARK REVIEWED", id="mark-reviewed-btn", className="workflow-btn", n_clicks=0, disabled=True),
-                html.Button("ACCEPT PLAN", id="accept-plan-btn", className="workflow-btn workflow-btn-accept", n_clicks=0, disabled=True),
-                html.Button("OVERRIDE", id="override-plan-btn", className="workflow-btn workflow-btn-override", n_clicks=0, disabled=True),
+                html.Button("COMMIT RECOVERY", id="accept-plan-btn", className="workflow-btn workflow-btn-accept", n_clicks=0, disabled=True),
+                html.Button("OPEN OVERRIDE", id="override-plan-btn", className="workflow-btn workflow-btn-override", n_clicks=0, disabled=True),
             ]),
             html.Div(
                 "Run a simulation to create an auditable scenario.",
@@ -373,9 +377,9 @@ def build_recovery_panel() -> html.Div:
 def build_monte_carlo_panel() -> html.Div:
     return html.Div(className="mc-panel", id="mc-panel", children=[
         html.Div(className="panel-header", children=[
-            html.Span("MONTE CARLO RISK ANALYSIS", className="panel-title"),
+            html.Span("RISK STUDIO · MONTE CARLO", className="panel-title"),
             html.Div(className="panel-header-actions", children=[
-                html.Span("RISK LAB", className="panel-badge", style={"marginRight": "6px"}),
+                html.Span("DECISION SCIENCE", className="panel-badge", style={"marginRight": "6px"}),
                 html.Span(f"{MC_SCENARIOS} SCENARIOS", className="panel-badge", style={"marginRight": "6px"}),
                 html.Button("▶  RUN MONTE CARLO", id="mc-run-btn", className="mc-run-btn", n_clicks=0),
                 html.Button("⬇  EXPORT PDF", id="pdf-export-btn", className="mc-export-btn", n_clicks=0, disabled=True),
@@ -398,7 +402,7 @@ def build_monte_carlo_panel() -> html.Div:
 def build_sensitivity_panel() -> html.Div:
     return html.Div(className="mc-panel", id="sensitivity-panel", children=[
         html.Div(className="panel-header", children=[
-            html.Span("TURNAROUND SENSITIVITY ANALYSIS", className="panel-title"),
+            html.Span("SENSITIVITY LAB · TURNAROUND", className="panel-title"),
             html.Div(className="panel-header-actions", children=[
                 html.Span("SENSITIVITY", className="panel-badge", style={"marginRight": "6px"}),
                 html.Button("▶  RUN SENSITIVITY", id="sensitivity-run-btn", className="mc-run-btn", n_clicks=0),
@@ -438,6 +442,56 @@ def build_layout(
 ) -> html.Div:
     return html.Div([
         build_header(system_status_label, data_source_label, data_health_label, data_mode_label),
+        html.Section(className="command-hero", children=[
+            html.Div(className="hero-copy", children=[
+                html.Div("01 / FLIGHT DESK · DOHA HUB", className="hero-eyebrow"),
+                html.H1("Move the hub\nbefore the delay.", className="hero-title"),
+                html.P("Read the ripple, protect the next departure, and move from signal to recovery without leaving the room.", className="hero-description"),
+                html.Div(className="hero-metrics", children=[
+                    html.Div(className="hero-metric", children=[
+                        html.Div("NETWORK", className="hero-metric-label"),
+                        html.Div([html.Span("32", className="hero-metric-value"), html.Span(" NODES", className="hero-metric-unit")]),
+                    ]),
+                    html.Div(className="hero-metric", children=[
+                        html.Div("DECISION LATENCY", className="hero-metric-label"),
+                        html.Div([html.Span("04", className="hero-metric-value"), html.Span(" MIN", className="hero-metric-unit")]),
+                    ]),
+                    html.Div(className="hero-metric", children=[
+                        html.Div("MODEL CONFIDENCE", className="hero-metric-label"),
+                        html.Div([html.Span("98.2", className="hero-metric-value"), html.Span(" %", className="hero-metric-unit")]),
+                    ]),
+                ]),
+                html.Div(className="hero-actions", children=[
+                    html.A("OPEN IMPACT CONSOLE  ↓", href="#network-graph", className="hero-action-primary"),
+                    html.A("HOW IT WORKS  ↗", href="#recovery-panel", className="hero-action-secondary"),
+                ]),
+            ]),
+            html.Div(className="hero-signal", children=[
+                html.Div(className="signal-orbit", children=[html.Span("LIVE", className="orbit-label"), html.Div(className="orbit-ring ring-one"), html.Div(className="orbit-ring ring-two")]),
+                html.Div(className="hero-signal-copy", children=[
+                    html.Div("HUB WINDOW · AST", className="hero-signal-kicker"),
+                    html.Div("06:28 — 08:40", className="hero-signal-title"),
+                    html.Div([html.Span("DOH", className="hero-route-node"), html.Span("↔", className="hero-route-arrow"), html.Span("32 FLIGHTS", className="hero-route-node")], className="hero-signal-note"),
+                ]),
+            ]),
+            html.Canvas(id="hero-scene", className="hero-scene", **{"aria-hidden": "true"}),
+            html.Div("SCROLL TO EXPLORE  ↓", className="hero-scroll-cue"),
+        ]),
+        html.Div(className="ops-ticker", children=[
+            html.Div("LIVE ROUTE INTELLIGENCE", className="ops-ticker-lead"),
+            html.Div("DOH  →  32 DEPARTURES", className="ops-ticker-item"),
+            html.Div("NEXT DECISION  06:28 AST", className="ops-ticker-item"),
+            html.Div("MODEL HEALTH  98.2%", className="ops-ticker-item ops-ticker-good"),
+            html.Div("◉  SYSTEM NOMINAL", className="ops-ticker-item ops-ticker-good"),
+        ]),
+        html.Nav(className="section-nav", children=[
+            html.Div("OPERATION / 01", className="section-nav-label"),
+            html.A("01 · BRIEF", href="#flight-select", className="section-nav-link active"),
+            html.A("02 · LENS", href="#network-graph", className="section-nav-link"),
+            html.A("03 · RADAR", href="#cascade-log", className="section-nav-link"),
+            html.A("04 · DESK", href="#recovery-panel", className="section-nav-link"),
+            html.A("05 · STUDIO", href="#mc-panel", className="section-nav-link"),
+        ]),
         html.Div(className="main-grid", children=[
             build_control_panel(flight_options, data_mode_label),
             build_network_panel(initial_graph_elements, initial_graph_stylesheet),
